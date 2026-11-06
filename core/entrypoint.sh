@@ -4,7 +4,7 @@
 set -e
 CA_HOME=${CA_HOME:-/ca}
 
-mkdir -p "$CA_HOME"/{ledgers,state,narrative,backpacks,config,data,engine}
+mkdir -p "$CA_HOME/ledgers" "$CA_HOME/state" "$CA_HOME/narrative" "$CA_HOME/backpacks" "$CA_HOME/config" "$CA_HOME/data" "$CA_HOME/engine"
 
 if [ ! -f "$CA_HOME/engine/.seeded-$(cat /opt/caos/engine/VERSION 2>/dev/null || echo v0)" ]; then
   if [ -z "$(ls -A "$CA_HOME/engine" 2>/dev/null | grep -v '^\.seeded' || true)" ]; then

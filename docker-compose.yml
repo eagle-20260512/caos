@@ -1,6 +1,4 @@
-name: caos
-
-# CAOS(Cognitive Agentic OS)一键部署:五容器拆分
+# CAOS(Cognitive Agentic OS)一键部署:五容器拆分(compose v1/v2 双兼容:项目名由目录名派生)
 # 安全形态:core/sandbox/egress 在 internal 内网,唯一出口=tinyproxy 白名单;sandbox 完全无网
 
 networks:
@@ -23,11 +21,12 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
       KIMI_API_KEY: ${KIMI_API_KEY:-}
+      MOCK_LLM_KEY: ${MOCK_LLM_KEY:-}   # 烟测/mock 模型用(models.json 指向 mock 条目时)
       # LLM 出网必经 egress 白名单代理(NODE_USE_ENV_PROXY:Node≥22.14 起 fetch 才认代理变量)
       NODE_USE_ENV_PROXY: "1"
       HTTPS_PROXY: http://ca-egress:8888
       HTTP_PROXY: http://ca-egress:8888
-      NO_PROXY: ca-sandbox,localhost,127.0.0.1
+      NO_PROXY: ca-sandbox,ca-mock,localhost,127.0.0.1
     volumes:
       - ca-data:/ca
     networks:
@@ -66,7 +65,7 @@ services:
       - ca-internal
       - ca-egress-net
     ports:
-      - "8321:8321"
+      - "8322:8321"
     depends_on:
       - ca-core
     restart: unless-stopped
