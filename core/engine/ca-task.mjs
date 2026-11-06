@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// ca-task.mjs — 任务实体层(批2,2026-11-06 批复;零 LLM 机械账)
+// ca-task.mjs — 任务实体层(, ;零 LLM 机械账)
 // 治什么:CA 自析②「预测要真咬人:落空后自动改行为,而非只记一行痛」+ 设计案「无任务实体=跨事件断裂之源」。
-//   痛(L2 事件)是一过性的,消化完就散;任务是跨事件实体——落空→bind.action 落成 task,不消化到 done 不散。
+// 痛(L2 事件)是一过性的,消化完就散;任务是跨事件实体——落空→bind.action 落成 task,不消化到 done 不散。
 // 账法:ledgers/tasks.jsonl append-only,同 id 后行盖前行(与 predictions 同构)。机械创建/推进/办结,语义归器官。
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CA = path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
 const TASKS = path.join(CA, 'ledgers', 'tasks.jsonl');
 
 const readAll = () => {
@@ -24,23 +24,23 @@ export function createTask({ goal, origin, pred = null, budget = null, due = nul
   // 同 origin 同 goal 不重复立(落空重判不重复咬)
   const dup = readAll().find((t) => t.origin === origin && t.goal === goal && t.state !== 'done' && t.state !== 'dropped');
   if (dup) return dup.id;
-  // 出生证+总债帽(2026-11-06 根治批·用户令「债务根治」):自生债无 checkCmd 不出生(销账必须免费机械化,否则债必堆积——
-  //   清算协议实弹:无判据的债只能 LLM 发作,阀一关就堆);open/doing ≥ 帽锁新生(产生速率必须<清算速率,零债=死寂不追求)。
-  //   豁免:用户钦令/清算协议债/人手 CLI=主权面;拒收不静默——落 rejected 行账可见(与 predictions 拒收同格)。
+  // 出生证+总债帽(·):自生债无 checkCmd 不出生(销账必须免费机械化,否则债必堆积——
+  // 清算协议:无判据的债只能 LLM 发作,阀一关就堆);open/doing ≥ 帽锁新生(产生速率必须<清算速率,零债=死寂不追求)。
+  // 豁免:用户/清算协议债/人手 CLI=主权面;拒收不静默——落 rejected 行账可见(与 predictions 拒收同格)。
   const SOVEREIGN = /^(user-decree|debt-|cli)/;
   const reject = (reason) => {
     try { appendFileSync(TASKS, JSON.stringify({ id: `task-rej-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, goal: String(goal).slice(0, 120), origin, state: 'rejected', rejected: reason, created: new Date().toISOString(), lastTouch: new Date().toISOString() }) + '\n'); } catch { /* 账不可写仍拒,不吞 */ }
     return null;
   };
   if (!SOVEREIGN.test(String(origin)) && !checkCmd) return reject('missing-checkCmd:出生证——自生债必须带机械销账判据(模式:落空预言的 check.cmd 自动继承)');
-  const OPEN_CAP = 50; // 体质常数:超帽锁新生,清到帽下方解(why:2026-11-06 open 41>done 7,产生>清算=熵积实弹)
+  const OPEN_CAP = 50; // 体质常数:超帽锁新生,清到帽下方解(why: open 41>done 7,产生>清算=熵积)
   if (!SOVEREIGN.test(String(origin)) && readAll().filter((t) => t.state === 'open' || t.state === 'doing').length >= OPEN_CAP) return reject(`open-cap:${OPEN_CAP} 顶帽——先清后生`);
   const id = `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   appendFileSync(TASKS, JSON.stringify({ id, goal, origin, pred, state: 'open', created: new Date().toISOString(), progressN: 0, lastTouch: new Date().toISOString(), ...(budget ? { budget: Number(budget) } : {}), burnOut: 0, ...(due ? { due } : {}), ...(checkCmd ? { checkCmd } : {}), ...(impact != null ? { impact: Math.max(0, Math.min(1, Number(impact))) } : {}) }) + '\n');
   return id;
 }
 
-// 清算面(2026-11-06 用户令「债务入库与设限」):open/doing 且带死线/验证断言的任务
+// 清算面:open/doing 且带死线/验证断言的任务
 export function dueTasks() {
   const now = Date.now();
   return readAll().filter((t) => (t.state === 'open' || t.state === 'doing') && t.due && Date.parse(t.due) < now);
@@ -87,7 +87,7 @@ export function staleTasks(nowMin = 0) {
 // CLI: node ca-task.mjs create --goal g --origin o | note <id> --text t | done <id> --evidence e | list
 const IS_MAIN = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (IS_MAIN && process.argv[2]) {
-  const [, , cmd, ...rest] = process.argv;
+  const [,, cmd, ...rest] = process.argv;
   const arg = (k) => { const i = rest.indexOf(`--${k}`); return i >= 0 ? rest[i + 1] : null; };
   if (cmd === 'create') console.log(createTask({ goal: arg('goal') ?? '(无 goal)', origin: arg('origin') ?? 'cli', pred: arg('pred'), budget: arg('budget'), due: arg('due'), checkCmd: arg('check-cmd'), impact: arg('impact') }));
   else if (cmd === 'note') console.log(touchTask(rest[0], { note: arg('text') }));

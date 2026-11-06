@@ -1,4 +1,4 @@
-// ca-pred-suspect:预测「疑误报」判据的唯一来源(2026-11-06 pred-bind 执行轮,promise:2026-11-06-144 / pred-mw4upmef-ln4r)。
+// ca-pred-suspect:预测「疑误报」判据的唯一来源(pred-bind 执行轮,promise:-144 /)。
 // 动机:ca-loop.mjs 的 SUSPECT_REASON 与 ca-pred-backfill.mjs 的内联判据两处各写一份,
 // 结果同一条落空:loop 标 falsePositiveSuspect 并仍记 miss,backfill 则改判 suspect 不计落空——同一事实两个结论。
 // 现在两处都 import 这里,判据改动只在这一个文件。

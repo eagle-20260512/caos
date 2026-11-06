@@ -1,24 +1,24 @@
 #!/usr/bin/env node
-// ca-decision.mjs — 决策状态机独立成层(批1,2026-11-06 用户批复批序;零 LLM 机械层)
+// ca-decision.mjs — 决策状态机独立成层(, 用户批序;零 LLM 机械层)
 // 为什么成层:四步闭环「刺激→我→行动→改变我」此前散在 loop/organ/compiler/throttle,无一处可读
-//   「我现在处于哪一步」。本层把每事件的决策环显式化:六态转移落账,环不完整=机械可见的洞。
+// 「我现在处于哪一步」。本层把每事件的决策环显式化:六态转移落账,环不完整=机械可见的洞。
 // 反射注册表=确定性架构形态(用户两次校正,非参数硬编码):
-//   TRANSITIONS 是声明式注册表——态×事件型→次态+守卫断言;加态/加边=注册一行,引擎不变。
+// TRANSITIONS 是声明式注册表——态×事件型→次态+守卫断言;加态/加边=注册一行,引擎不变。
 // confidence 分档(CA 自析③「不确定摆校准区,别硬编承诺」):
-//   decide 产出带 confidence(high/low);low→calibrating 区,不进承诺账,账面上可分辨「我确定/我校准中」。
+// decide 产出带 confidence(high/low);low→calibrating 区,不进承诺账,账面上可分辨「我确定/我校准中」。
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CA = path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
 const L = (r) => path.join(CA, r);
 const DECISION = L('ledgers/decision.jsonl');
 const ORGAN = L('ledgers/organ.jsonl');
 const QUEUE = L('state/event-queue.jsonl');
 
 // ── 反射注册表(声明式;确定性架构形态) ──
-//  每行: { from, on(事件型), to, guard(机械断言,返回 true 才准转) }
+// 每行: { from, on(事件型), to, guard(机械断言,返回 true 才准转) }
 export const TRANSITIONS = [
   { from: 'sense',  on: '*',        to: 'orient', guard: (c) => !!c.evId },
   { from: 'orient', on: '*',        to: 'decide', guard: (c) => c.reads >= 0 }, // 读了什么账(0 也是读数,如实)

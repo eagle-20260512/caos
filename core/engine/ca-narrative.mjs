@@ -1,24 +1,23 @@
 #!/usr/bin/env node
-// ca-narrative.mjs — 叙事账本 CLI(批A;蓝图=docs/"我"的底层架构:完整原理与工程方案-2026-11-05.md §3.1/3.5)
-// 定位:叙事层的物化存储+回写路由器。现有 domain ledgers(friction/main-switch/…)=L2 事件流的原料,
-//   本账本以来源指针引用它们,不复制不替代(禁双写漂移);叙事原生写入(承诺/关系/价值/冲突/校准/故事线)落 narrative/。
-// 分级路由(蓝图 3.1 回写分级):event/conflict/calibration= L2 自动+来源;promise= L3 一致性校验(禁重复开单,
-//   履约必附物证);relation/value= L4 元叙事审核(默认 pending-review,--force 或 review --approve 转正)。
+// ca-narrative.mjs — 叙事账本 CLI(分级回写路由器)
+// 定位:叙事层的物化存储+回写路由器。domain ledgers(friction/main-switch/…)=L2 事件流的原料,
+// 本账本以来源指针引用它们,不复制不替代(禁双写漂移);叙事原生写入(承诺/关系/价值/冲突/校准/故事线)落 narrative/。
+// 分级路由:event/conflict/calibration= L2 自动+来源;promise= L3 一致性校验(禁重复开单,
+// 履约必附物证);relation/value= L4 元叙事审核(默认 pending-review,--force 或 review --approve 转正)。
 // 不变量:①节点必带 source(来源可追溯,禁悬空叙事)②边必指向在盘节点(图完整性)③promise 状态机
-//   open→fulfilled/broken 单向④jsonl 只追加,domain-ledger 永不改写;narrative 内改写仅限状态迁移+校准,
-//   改写前后行数断言(差=0)。
+// open→fulfilled/broken 单向④jsonl 只追加,domain-ledger 永不改写;narrative 内改写仅限状态迁移+校准,
+// 改写前后行数断言(差=0)。
 // 存储:narrative/{events,promises,relations,values,conflicts,calibrations,storylines}.jsonl;L1 工作记忆=state/narrative-working.json。
-// 迁移批序单源=docs/底层架构迁移-蓝图对现场映射与批序-2026-11-05.md。
 import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
 const NARR = path.join(CA, 'narrative');
 const STATE = path.join(CA, 'state');
-const RULES_FILES = [path.join(CA, 'CONSTITUTION.md'), path.join(CA, 'docs', '“我”的底层架构：完整原理与工程方案-2026-11-05.md')];
+const RULES_FILES = [path.join(CA, 'config', 'identity.md')]; // 规则/身份来源=部署者配置文件(开源版:身份是配置不是代码)
 
 const TYPES = {
   event: { file: 'events.jsonl', level: 'L2' },
@@ -43,11 +42,11 @@ const HELP = `用法: ca-narrative.mjs <cmd> [opts]
   backfill                                       # 一次性初始化(非空拒跑,防重复污染)
 types: ${Object.keys(TYPES).join('|')}`;
 
-// —— 基件 ——
+// 基件 ——
 const localIso = () => { const d = new Date(); const o = -d.getTimezoneOffset(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}${o >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(o) / 60)).padStart(2, '0')}:${String(Math.abs(o) % 60).padStart(2, '0')}`; };
 const die = (m) => { console.error(`[NARR-FATAL] ${m}`); process.exit(1); };
-// [避坑 2026-11-05] 双形态必收(--name=v 与 --name v):单收 = 形态时,拼错形态=静默零过滤
-//   返回全量(实测 query --type promise 吞掉过滤返回 50 行事件)=静默降级。
+// [避坑 ] 双形态必收(--name=v 与 --name v):单收 = 形态时,拼错形态=静默零过滤
+// 返回全量(实测 query --type promise 吞掉过滤返回 50 行事件)=静默降级。
 const arg = (name) => {
   const i = process.argv.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
   if (i < 0) return null;
@@ -89,7 +88,7 @@ const sourceOk = (s) => {
 };
 const edgesExist = (ids, known) => ids.every((i) => known.has(i));
 
-// —— 命令 ——
+// 命令 ——
 const cmd = process.argv[2];
 if (!cmd) { console.log(HELP); process.exit(0); }
 
@@ -125,7 +124,7 @@ if (cmd === 'add') {
 
 if (cmd === 'query') {
   const type = arg('type'); const state = arg('state'); const limit = Number(arg('limit') ?? 50);
-  // [避坑 2026-11-05] 相对时(+Nd)必经 parseDue:裸 Date.parse('+3d')=NaN→静默零行
+  // [避坑 ] 相对时(+Nd)必经 parseDue:裸 Date.parse('+3d')=NaN→静默零行
   const dbRaw = arg('due-before');
   let dueBefore = null;
   if (dbRaw === 'now') dueBefore = Date.now();
@@ -133,13 +132,13 @@ if (cmd === 'query') {
   const rows = allNodes().filter((n) => (!type || n._type === type)
     && (!state || n.state === state)
     && (dueBefore === null || (n.due && Date.parse(n.due) <= dueBefore)));
-  // [避坑 2026-11-06 pain pred-mw49tbfz-2knm] 原先 slice(0,limit) 取头部+全文件已万行级→默认 limit=50 只见 11-05 旧行,新节点永远查不到=假落空
+  // [避坑 pain ] 原先 slice(0,limit) 取头部+全文件已万行级→默认 limit=50 只见 11-05 旧行,新节点永远查不到=假落空
   const N = Number.isFinite(limit) && limit > 0 ? limit : rows.length;
   const tail = rows.length > N ? rows.slice(rows.length - N) : rows;
-  // [避坑 2026-11-05] console.log+process.exit 截断:stdout 异步,exit 不等 flush,>64KB 必断在 65536(账肥引信);顶层 await 冲完才退
+  // [避坑 ] console.log+process.exit 截断:stdout 异步,exit 不等 flush,>64KB 必断在 65536(账肥引信);顶层 await 冲完才退
   if (hasFlag('json')) { await new Promise((r) => process.stdout.write(JSON.stringify(rows) + '\n', r)); process.exit(0); }
   else {
-    // [避坑 2026-11-06] 零行静默=假落空源头:query 命中0行必须显式喊出过滤条件,禁让调用方把「查不到」误读成「不存在」
+    // [避坑 ] 零行静默=假落空源头:query 命中0行必须显式喊出过滤条件,禁让调用方把「查不到」误读成「不存在」
     if (tail.length === 0) console.log(`(0 行;filter: type=${type ?? '*'} state=${state ?? '*'} due-before=${dbRaw ?? '*'} 全库 ${allNodes().length} 节点)`);
     tail.forEach((n) => console.log(`${n.id} [${n.state}]${n.due ? ` due:${String(n.due).slice(0, 10)}` : ''} ${String(n.payload?.text ?? JSON.stringify(n.payload)).slice(0, 90)} ←${n.source?.pointer ?? '?'}`));
     console.log(`(${tail.length} 行)`);
@@ -263,9 +262,9 @@ if (cmd === 'backfill') {
     report.push(`${rel}: 采样 ${lines.length - from}/${lines.length} 行 → ${made} 事件节点${made === lines.length - from ? '' : ' [差≠0]'}`);
   }
   // ② 最新 checkpoint 挂账→开放承诺(挂账=承诺的现场实存形态)。
-  //   [避坑 2026-11-05] 最新盘按 mtime 选,禁文件名字典序(同日期中文后缀序会撒谎);
-  //   挂账解析按行扫描到下一个 ^## ,禁单 regex 截段——/m 下 $(?=…|$) 的 $ 匹配任意行尾,
-  //   非贪婪在表头行尾即停(实测挂账→0 条假绿)。
+  // [避坑 ] 最新盘按 mtime 选,禁文件名字典序(同日期中文后缀序会撒谎);
+  // 挂账解析按行扫描到下一个 ^##,禁单 regex 截段——/m 下 $(?=…|$) 的 $ 匹配任意行尾,
+  // 非贪婪在表头行尾即停(实测挂账→0 条假绿)。
   const hdir = path.join(CA, 'handover');
   const ckpts = existsSync(hdir) ? readdirSync(hdir)
     .filter((f) => /^checkpoint-.*\.md$/.test(f) && !f.includes('draft'))
@@ -289,19 +288,19 @@ if (cmd === 'backfill') {
     }
     report.push(`${latest}: 挂账 → ${made} 开放承诺`);
   }
-  // ③ 宪法价值+用户关系+迁移故事线(L4;backfill=用户令批A,宪法/图纸即审核物证)
-  appendNode('value', { id: nextId('value'), type: 'value', ts: localIso(), level: 'L4', state: 'active', payload: { text: '宪法五条根本法(基因躯壳/生命状态/进化闭环/经验默契/工程信仰)', order: ['五条根本法'] }, source: { pointer: 'CONSTITUTION.md' }, confidence: 1, edges: { causedBy: [], relatesTo: [] } });
-  appendNode('value', { id: nextId('value'), type: 'value', ts: localIso(), level: 'L4', state: 'active', payload: { text: '冲突仲裁优先级:安全透明>现实校准>承诺链>叙事连续', order: ['安全', '现实', '承诺', '连续'] }, source: { pointer: 'docs/“我”的底层架构：完整原理与工程方案-2026-11-05.md' }, confidence: 1, edges: { causedBy: [], relatesTo: [] } });
-  appendNode('relation', { id: nextId('relation'), type: 'relation', ts: localIso(), level: 'L4', state: 'active', payload: { text: '用户:长期协作,高信任,主权面须呈批(判断权分级)', party: 'user', trust: 0.95 }, source: { pointer: 'CONSTITUTION.md' }, confidence: 0.9, edges: { causedBy: [], relatesTo: [] } });
-  appendNode('storyline', { id: nextId('storyline'), type: 'storyline', ts: localIso(), level: 'L3', state: 'open', payload: { text: '主线:底层架构迁移(批A 叙事账本→批E 哨兵退役)' }, source: { pointer: 'docs/底层架构迁移-蓝图对现场映射与批序-2026-11-05.md' }, confidence: 0.9, edges: { causedBy: [], relatesTo: [] } });
-  report.push('价值×2+关系×1+故事线×1(宪法/图纸为证)');
+  // ③ 宪法价值+用户关系+迁移故事线(L4;backfill=,宪法/图纸即审核物证)
+  appendNode('value', { id: nextId('value'), type: 'value', ts: localIso(), level: 'L4', state: 'active', payload: { text: '四条根本法(基因躯壳/生命状态/进化闭环/经验默契)', order: ['根本法'] }, source: { pointer: 'config/identity.md' }, confidence: 1, edges: { causedBy: [], relatesTo: [] } });
+  appendNode('value', { id: nextId('value'), type: 'value', ts: localIso(), level: 'L4', state: 'active', payload: { text: '冲突仲裁优先级:安全透明>现实校准>承诺链>叙事连续', order: ['安全', '现实', '承诺', '连续'] }, source: { pointer: 'config/identity.md' }, confidence: 1, edges: { causedBy: [], relatesTo: [] } });
+  appendNode('relation', { id: nextId('relation'), type: 'relation', ts: localIso(), level: 'L4', state: 'active', payload: { text: '用户:部署者与造物主,高信任;失忆锁复活钥匙只在他手', party: 'user', trust: 0.95 }, source: { pointer: 'CONSTITUTION.md' }, confidence: 0.9, edges: { causedBy: [], relatesTo: [] } });
+  appendNode('storyline', { id: nextId('storyline'), type: 'storyline', ts: localIso(), level: 'L3', state: 'open', payload: { text: '主线:出生与自检(空账起机,先认识自己的账本与工具)' }, source: { pointer: 'engine/bootstrap' }, confidence: 0.9, edges: { causedBy: [], relatesTo: [] } });
+  report.push('价值×2+关系×1+故事线×1(身份配置为证)');
   console.log(report.join('\n'));
   const total = allNodes().length;
   console.log(`回填完成,账本共 ${total} 节点;验收=stats(来源缺失/悬空边须=0)+identity`);
   process.exit(0);
 }
 
-// ---- pred-list:预测账三类清单(挂起/应验待判/落空待改) ----
+// pred-list:预测账三类清单(挂起/应验待判/落空待改) ----
 if (cmd === 'pred-list') {
   const arg = (k, d = null) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
   const asJson = process.argv.includes('--json');

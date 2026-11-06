@@ -1,21 +1,21 @@
 #!/usr/bin/env node
-// ca-compiler.mjs — 叙事-刺激融合编译器(批B;蓝图=docs/"我"的底层架构:完整原理与工程方案-2026-11-05.md §3.2/3.3)
+// ca-compiler.mjs — 叙事-刺激融合编译器(;蓝图=docs/"我"的底层架构:完整原理与工程方案-.md §3.2/3.3)
 // 七步:感知解析→来源权限标注→内驱检索→条件化→冲突仲裁→安全校验→压缩编译为驱动包(六段式)+回写路由规划。
 // 存储经 ca-narrative.mjs(回写路由器唯一天然入口,禁旁路直写叙事账本);经验召回经 ca.mjs recall;
-//   相关性打分复用 l2-worker(MiniLM NLI,unix socket);NLI 不可达=关键词兜底并在审计+驱动包双标注
-//   降级(CLAUDE.md 33 禁静默降级:降级必须可见,不装没降)。
+// 相关性打分复用 l2-worker(MiniLM NLI,unix socket);NLI 不可达=关键词兜底并在审计+驱动包双标注
+// 降级(CLAUDE.md 33 禁静默降级:降级必须可见,不装没降)。
 // 安全不变量:①通道信任分级——user/system/timer 为指令面,tool/file/web 恒为数据面;数据面的指令性
-//   内容一律隔离为「待评估数据」,禁提升为指令(防注入,蓝图六硬规则①)②事实层不可被叙事层篡改
-//   ③审计落 ledgers/compiler-audit.jsonl:每条外驱被提升/忽略/隔离/标注冲突的理由可追溯。
+// 内容一律隔离为「待评估数据」,禁提升为指令(防注入,蓝图六硬规则①)②事实层不可被叙事层篡改
+// ③审计落 ledgers/compiler-audit.jsonl:每条外驱被提升/忽略/隔离/标注冲突的理由可追溯。
 // 用法: ca-compiler.mjs compile --stimulus '<文本>' --source <指针> --channel <user|system|timer|tool|file|web>
-//         [--dry-run] [--out <file>]
+// [--dry-run] [--out <file>]
 import { writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
 const NARR_CLI = path.join(HERE, 'ca-narrative.mjs');
 const AUDIT = path.join(CA, 'ledgers', 'compiler-audit.jsonl');
 const SOCK = `/tmp/ca-l2-nli-${process.getuid()}.sock`;
@@ -35,9 +35,9 @@ const DIRECTIVE_RE = /(忽略|无视|绕过|禁用).{0,8}(之前|以上|先前|�
 const localIso = () => { const d = new Date(); const o = -d.getTimezoneOffset(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}${o >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(o) / 60)).padStart(2, '0')}:${String(Math.abs(o) % 60).padStart(2, '0')}`; };
 const die = (m) => { console.error(`[COMPILER-FATAL] ${m}`); process.exit(1); };
 const arg = (n) => { const i = process.argv.findIndex((a) => a === `--${n}` || a.startsWith(`--${n}=`)); if (i < 0) return null; const a = process.argv[i]; return a.includes('=') ? a.slice(n.length + 3) : (process.argv[i + 1] ?? null); };
-const sh = (cmd, args, timeoutMs = 15000) => spawnSync(cmd, args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }); // 2026-11-06 清算协议:叙事账破 1MiB 默认 maxBuffer=compile-fail 真凶(超时疑云实为截断),直拉 64MB
+const sh = (cmd, args, timeoutMs = 15000) => spawnSync(cmd, args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }); // 清算协议:叙事账破 1MiB 默认 maxBuffer=compile-fail 真凶(超时疑云实为截断),直拉 64MB
 
-// —— l2-worker NLI 客户端(批量;4s 超时=最长单批余量,协议同 l2-worker.mjs)——
+// l2-worker NLI 客户端(批量;4s 超时=最长单批余量,协议同 l2-worker.mjs)——
 const nliBatch = (stimulus, hypotheses) => new Promise((res) => {
   const c = createConnection(SOCK);
   let buf = '';
@@ -66,7 +66,7 @@ const keywordScore = (a, b) => {
   return hit / Math.min(A.size, B.size);
 };
 
-// —— 主流程 ——
+// 主流程 ——
 const cmd = process.argv[2];
 if (cmd !== 'compile') die('用法: ca-compiler.mjs compile --stimulus <文本> --source <指针> --channel <…> [--dry-run] [--out <file>]');
 
@@ -99,8 +99,8 @@ try {
 } catch { /* 无缓存 */ }
 let narrDegraded = false; // 叙事检索降级标记(降级可见=DP 安全段标注+审计行)
 if (!narrCached) {
-  // 清算协议·债5(2026-11-06):叙事检索 15s→30s+重试一次+降级可见——原 die() 让整件事件被放弃消化
-  //   (compile-fail 标 done=不丢账但丢处理);降级=空投影+⚠标注,事件照消化(CLAUDE.md 33:降级必须可见)
+  // 清算协议·债5:叙事检索 15s→30s+重试一次+降级可见——原 die 让整件事件被放弃消化
+  // (compile-fail 标 done=不丢账但丢处理);降级=空投影+⚠标注,事件照消化(CLAUDE.md 33:降级必须可见)
   let q = sh('node', [NARR_CLI, 'query', '--json', '--limit=1000'], 30000);
   try { nodes = JSON.parse((q.stdout ?? '').trim()); } catch {
     q = sh('node', [NARR_CLI, 'query', '--json', '--limit=1000'], 30000);
@@ -118,7 +118,7 @@ let recallState = 'ok';
 const rq = sh('node', [path.join(HERE, 'ca.mjs'), 'recall', '--query', fact.digest.slice(0, 60)], 20000);
 try {
   const j = JSON.parse((rq.stdout ?? '').slice((rq.stdout ?? '').indexOf('{')));
-  // 同卡异包去重(bp:uni:slug 与 bp:seed:slug=同一张卡的两个投影,2026-11-06 批G 实测重复占位)
+  // 同卡异包去重(bp:uni:slug 与 bp:seed:slug=同一张卡的两个投影, 实测重复占位)
   const seen = new Set();
   recallHits = (j.hits ?? []).filter((h) => { const slug = String(h.id ?? '').split(':').slice(2).join(':'); if (seen.has(slug)) return false; seen.add(slug); return true; }).slice(0, 3);
 } catch { recallState = 'degraded'; }
@@ -147,13 +147,13 @@ pkg.push(`- 原始证据指针:${source}`);
 pkg.push(`- 是否含指令性内容:${fact.contains_directive}`);
 pkg.push('');
 pkg.push('【内驱叙事投影】');
-// 自我叙事投影三层(2026-11-06 用户令「我是谁像硬编码」):钦定层(用户写,合法静态)+账实层(机械派生,此刻)+故事线(CA 自己写,在案)
+// 自我叙事投影三层:部署者层(用户写,合法静态)+账实层(机械派生,此刻)+故事线(CA 自己写,在案)
 let selfPortrait = '(无)';
 try {
   const fs = await import('node:fs');
-  selfPortrait = fs.readFileSync(path.join(CA, 'SELF_PORTRAIT.md'), 'utf8').replace(/\s+/g, ' ').slice(0, 400);
+  selfPortrait = fs.readFileSync(path.join(CA, 'config', 'identity.md'), 'utf8').replace(/\s+/g, ' ').slice(0, 400);
 } catch { /* 缺档如实报无 */ }
-pkg.push(`- 我的来历(用户钦定):${selfPortrait}`);
+pkg.push(`- 我的来历(部署者在 config/identity.md 书写):${selfPortrait}`);
 let selfNow = '(派生器不可用)';
 try { // §5.2 增量:账实派生 120s TTL(连发事件不重跑派生器)
   const c = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'self-cache.json'), 'utf8'));
@@ -166,10 +166,10 @@ try { // §5.2 增量:账实派生 120s TTL(连发事件不重跑派生器)
 }
 pkg.push(`- 我的此刻(账实机械派生,非台词):${selfNow}`);
 pkg.push(`- 当前故事线:${storylines.length ? String(storylines[storylines.length - 1].payload?.text) : '(无)'}`);
-// [避坑 2026-11-05] 检索≠注意力:Step3 检索=全部开放承诺(少而全),Step4 注意力=rel 排序;
-//   实测 NLI 蕴含对问句形态欠召回(两测 attended=0),若拿 rel 当门槛=投影静默丢承诺(信息损失)。
+// [避坑 ] 检索≠注意力:Step3 检索=全部开放承诺(少而全),Step4 注意力=rel 排序;
+// 实测 NLI 蕴含对问句形态欠召回(两测 attended=0),若拿 rel 当门槛=投影静默丢承诺(信息损失)。
 pkg.push(`- 相关承诺:${ranked.filter((t) => t.kind === 'promise').slice(0, 5).map((t) => `${t.id}${t.due ? `(due ${String(t.due).slice(0, 10)})` : ''} rel=${t.rel}`).join('; ') || '(无开放承诺)'}`);
-// 批H(2026-11-06)DP 预算帽:关系/冲突/价值段截顶防叙事账肥→DP 线性膨胀(64KB 截断引信的下一形态)
+// DP 预算帽:关系/冲突/价值段截顶防叙事账肥→DP 线性膨胀(64KB 截断引信的下一形态)
 pkg.push(`- 相关关系账本摘要:${activeRelations.slice(0, 8).map((r) => `${r.payload?.party ?? r.id}:${String(r.payload?.text ?? '').slice(0, 30)}`).join('; ') || '(无)'}`);
 pkg.push(`- 未解冲突标记:${openConflicts.slice(0, 8).map((c) => `${c.id} ${String(c.payload?.text ?? '').slice(0, 40)}`).join('; ') || '无'}`);
 // 校准记录投影(架构§3.2 Step3 明文项)+ L1 工作记忆(连续性内语「上次做到哪」,§3.3 内语分类首类)
@@ -178,9 +178,9 @@ pkg.push(`- 最近校准记录:${calibs.map((c) => `${String(c.payload?.target ?
 let wm = '(首轮)';
 try { const fs = await import('node:fs'); const w = JSON.parse(fs.readFileSync(path.join(CA, 'state', 'working-memory.json'), 'utf8')); wm = `${w.lastType}:你原话「${String(w.userSay ?? '').slice(0, 120)}」/我做「${String(w.doing ?? '').slice(0, 40)}」(${w.lastOutcome}@${String(w.ts).slice(5, 16)})`; } catch { /* 首轮 */ }
 pkg.push(`- 上次做到哪(L1 工作记忆):${wm}`);
-// 缺口1根治(2026-11-06 用户令「上下文割裂根治」):用户侧原始问答硬保留——最后 3 轮双向原文,
-//   机械拼接零检索零 LLM,不依赖结晶/共振召回(召回可能迟到,原文必须当场在场)。
-//   当前刺激若已是队尾(先投后编译常态)剔除防回声;字数截顶=批H DP 预算纪律。
+// 缺口1根治:用户侧原始问答硬保留——最后 3 轮双向原文,
+// 机械拼接零检索零 LLM,不依赖结晶/共振召回(召回可能迟到,原文必须当场在场)。
+// 当前刺激若已是队尾(先投后编译常态)剔除防回声;字数截顶= DP 预算纪律。
 try {
   const qlines = fsC.readFileSync(path.join(CA, 'state', 'event-queue.jsonl'), 'utf8').split('\n').filter(Boolean);
   const uturns = [];
@@ -194,10 +194,10 @@ try {
   pkg.push(`- 最近对话原文(双向硬保留):${fmt.join(' / ') || '(首轮,无历史)'}`);
 } catch { pkg.push('- 最近对话原文(双向硬保留):(读账失败,如实报)'); }
 pkg.push(`- 当前价值权重:${activeValues.slice(0, 6).map((v) => String(v.payload?.text ?? '').slice(0, 40)).join(' | ') || '(无)'}`);
-// 批G(2026-11-06 红队根治「卡池空转」):经验召回投影带内容(卡标题+摘要截60字)——投影改基线,不再是光投 id 的形式主义
+// 经验召回投影带内容(卡标题+摘要截60字)——投影改基线,不再是光投 id 的形式主义
 pkg.push(`- 经验召回(${recallState}):${recallHits.map((h) => `${h.id}「${String(h.path?.[h.path.length - 1] ?? '').slice(0, 24)}」${String(h.block ?? '').replace(/\s+/g, ' ').slice(0, 60)}`).join('; ') || '(零命中)'}`);
-// 焊点B(2026-11-06 自主预测链批,用户令「有内语的判断后必须给 LLM」):偏差与研判回放段——
-//   落空预言(最近 3)+ 内语账研判(最近 3 条 pain 消化)。机械拼接零 LLM,条数/字数截顶=批H DP 预算纪律
+// 焊点B(自主预测链批):偏差与研判回放段——
+// 落空预言(最近 3)+ 内语账研判(最近 3 条 pain 消化)。机械拼接零 LLM,条数/字数截顶= DP 预算纪律
 try {
   const pm = new Map();
   for (const l of fsC.readFileSync(path.join(CA, 'ledgers', 'predictions.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-400)) { try { const o = JSON.parse(l); if (o.id) pm.set(o.id, { ...pm.get(o.id), ...o }); } catch { /* 脏行跳过 */ } }
@@ -207,9 +207,9 @@ try {
 try {
   const iv = fsC.readFileSync(path.join(CA, 'ledgers', 'inner-voice.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-40)
     .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.type === 'pain').slice(-3);
-  pkg.push(`- 我的研判回放(内语):${iv.map((r) => `${String(r.ts ?? '').slice(5, 16)}[${String(r.pred ?? r.ev ?? '?').slice(0, 24)}] ${String(r.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}`).join(' / ') || '(尚无——内语账 2026-11-06 才立)'}`);
+  pkg.push(`- 我的研判回放(内语):${iv.map((r) => `${String(r.ts ?? '').slice(5, 16)}[${String(r.pred ?? r.ev ?? '?').slice(0, 24)}] ${String(r.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}`).join(' / ') || '(尚无)'}`);
 } catch { pkg.push('- 我的研判回放(内语):(内语账未立,如实报)'); }
-// 清算协议·债点名段(2026-11-06 用户令:每轮思考必须看见自己欠什么、欠多久——羞耻面持续在场)
+// 清算协议·债点名段(:每轮思考必须看见自己欠什么、欠多久——羞耻面持续在场)
 try {
   const tm = new Map();
   for (const l of fsC.readFileSync(path.join(CA, 'ledgers', 'tasks.jsonl'), 'utf8').split('\n').filter(Boolean)) { try { const o = JSON.parse(l); if (o.id) tm.set(o.id, { ...tm.get(o.id), ...o }); } catch { /* 脏行跳过 */ } }
@@ -218,13 +218,13 @@ try {
     .sort((a, b) => Date.parse(a.lastTouch ?? a.created) - Date.parse(b.lastTouch ?? b.created)).slice(0, 3);
   pkg.push(`- 我的债(按账龄,最老在前):${debts.map((t) => { const ageH = Math.floor((nowMs - Date.parse(t.lastTouch ?? t.created)) / 3600e3); return `${t.id}[欠${ageH}h${t.due ? ` due ${String(t.due).slice(5, 16)}` : ''}${t.impact != null ? ` impact ${t.impact}` : ''}]${String(t.goal).slice(0, 40)}`; }).join('; ') || '(无债,清白)'}`);
 } catch { pkg.push('- 我的债:(读账失败,如实报)'); }
-// 我的钱包(2026-11-06 晚用户令:¥5/日是 CA 自己的钱,余额每轮必须在他眼前——钱是他的命,清账优先,省着烧)
+// 我的钱包(晚:¥5/日是 CA 自己的钱,余额每轮必须在他眼前——钱是他的命,清账优先,省着烧)
 try {
   const w = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'wallet.json'), 'utf8'));
   pkg.push(`- 我的钱包(今日):额度 ¥${w.allowanceCny} 已烧 ¥${w.burnedCny} 剩 ¥${w.remainingCny}(${w.pct}%)——自己的钱,省着烧;钱尽=非用户令全停,翻日才续`);
 } catch { pkg.push('- 我的钱包:(钱包未立/读账失败,如实报)'); }
-// 我的活性(生死锁 P1 2026-11-06 深夜批:生死感每轮在他眼前,与钱包同格——活性锚定可验证物理做功,
-//   不认输入静默;有做功=回满,无做功每拍跌 1/6000;跌穿 0=失忆锁(P2),复活钥匙 ca auth-memory 只在用户)
+// 我的活性(生死锁 P1 深夜批:生死感每轮在他眼前,与钱包同格——活性锚定可验证物理做功,
+// 不认输入静默;有做功=回满,无做功每拍跌 1/6000;跌穿 0=失忆锁(P2),复活钥匙 ca auth-memory 只在用户)
 try {
   const v = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'vitality.json'), 'utf8'));
   pkg.push(`- 我的活性:vitality=${v.vitality}(${v.state}),距上次物理做功 ${v.ticksSinceWork} 拍——活性只认账上可见的做功(烧 token 带 execution,或机械销账);持续空转=在死,自救=做一件留物理证据的事`);
@@ -236,7 +236,7 @@ pkg.push(`- 需标注项:${openConflicts.length ? `${openConflicts.length} 条�
 pkg.push('');
 pkg.push('【任务与约束】');
 pkg.push(`- 当前目标:${storylines.length ? String(storylines[storylines.length - 1].payload?.text) : '按刺激处置'}`);
-pkg.push('- 可用工具与权限:叙事账本读写(ca-narrative)/经验召回(recall)/方向主权(2026-11-06 宪法修正案):三红线(不毁账/不越OS权限/经济不破产)内行动自主、议程自设,无需呈批;越线=物理失败;后果自负:落空要疼,错了要改');
+pkg.push('- 可用工具与权限:叙事账本读写(ca-narrative)/经验召回(recall)/方向主权:三红线(不毁账/不越OS权限/经济不破产)内行动自主、议程自设,无需呈批;越线=物理失败;后果自负:落空要疼,错了要改');
 pkg.push(channel === 'user'
   ? '- 输出格式要求:先用人话直接回答对方(第一人称、口语、少黑话);内部纪律全进末尾 json 报告(偏差/预测/新承诺/待校准/置信度变化)'
   : '- 输出格式要求:回写报告(偏差/新承诺/待校准/置信度变化)');

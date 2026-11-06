@@ -3,9 +3,9 @@
 // 动机:pred-rej-* 是被 organ 拒绝后才看得见的伤口。要在发出去之前自查,把"缺 bind / check 是空泛词 / 预测押外部主体"挡在门外。
 // 设计律:校验规则不另写一套——从 ca-organ.mjs 的 routeWriteback 里抠出判据函数(dryRun 路由),金律②「反向负例」。
 // 用法:
-//   node scripts/ca-report-check.mjs <file>        # 体检文件里的 ```json 报告
-//   node scripts/ca-report-check.mjs --stdin       # 体检 stdin(交互:喂答案原文)
-//   node scripts/ca-report-check.mjs --selftest    # 正反例自检(0/0=假绿防治)
+// node engine/ca-report-check.mjs <file> # 体检文件里的 ```json 报告
+// node engine/ca-report-check.mjs --stdin # 体检 stdin(交互:喂答案原文)
+// node engine/ca-report-check.mjs --selftest # 正反例自检(0/0=假绿防治)
 // 退出码:0=全部合法 / 1=有违例 / 2=解析不出报告
 import { readFileSync } from 'node:fs';
 import * as fsMod from 'node:fs';
@@ -45,17 +45,17 @@ function extractReport(text) {
 }
 
 export function check(text, source = 'report-check') {
-  // 2026-11-06 教训(用户驳回「加 timeout 10s」药方):本文件两处读取都是同步 readFileSync,
-  //   进程被外部 timeout/SIGTERM 掐断=工作全丢,加超时不是防护是自杀。
-  //   要真防护只能改读取方式(流式/子进程可取消),不是套一层计时器。动手前先看底层是同步还是流式。
+  // 教训(用户驳回「加 timeout 10s」药方):本文件两处读取都是同步 readFileSync,
+  // 进程被外部 timeout/SIGTERM 掐断=工作全丢,加超时不是防护是自杀。
+  // 要真防护只能改读取方式(流式/子进程可取消),不是套一层计时器。动手前先看底层是同步还是流式。
   const { report, raw } = extractReport(text);
   if (!report) return { ok: false, code: 2, errors: ['解析不出 json 报告块(围栏/平衡括号都失败)'], warnings: [], report: null };
   // 真判据 = organ 自己的路由(不入账、不进队列)
   const { writes } = routeWriteback(raw, { source, dryRun: true });
   const errors = [], warnings = [];
   const preds = writes.filter((w) => w.kind === 'prediction');
-  // 2026-11-06 自修(selftest 负例「缺 bind」漏咬,code=0 假绿):organ 对 bind 的拒收只在 reject() 分支里成文,
-  //   dryRun 下成功预测不进 writes,靠条数比对会假红 → 体检器自己对 bind.action 硬判,不靠 organ 兜底(金律②:正例过、负例必咬)。
+  // 自修(selftest 负例「缺 bind」漏咬,code=0 假绿):organ 对 bind 的拒收只在 reject 分支里成文,
+  // dryRun 下成功预测不进 writes,靠条数比对会假红 → 体检器自己对 bind.action 硬判,不靠 organ 兜底(金律②:正例过、负例必咬)。
   for (const w of preds) {
     if (!w.ok) errors.push(`prediction 被组织拒绝:${w.rejected}（${w.about}）`);
   }
@@ -69,10 +69,10 @@ export function check(text, source = 'report-check') {
   }
   const ps = report.predictions ?? [];
   if (ps.length === 0) errors.push('predictions 为空:每轮至少 1 条');
-  // 2026-11-06 自修(体检器与组织判据漂移):上面按 organ 的 routeWriteback 逐条路由,但若报告里 predictions
-  //   的形态让 organ 少收/多收,本器的 ok 就成了假绿。predIds 长度必须与入参条数一致——不等=判据漂移,当场报 error。
-  // 2026-11-06 实测修正:dryRun 下 organ routeWriteback 根本不走预测路由(直接 return writeback-verify),preds 恒空 →
-  //   条数比对本就无法成立。改为:只有 dryRun 下真收到 prediction 类 writes 时才比对,否则交由下面硬判据(allocation 之外不猜)。
+  // 自修(体检器与组织判据漂移):上面按 organ 的 routeWriteback 逐条路由,但若报告里 predictions
+  // 的形态让 organ 少收/多收,本器的 ok 就成了假绿。predIds 长度必须与入参条数一致——不等=判据漂移,当场报 error。
+  // 实测修正:dryRun 下 organ routeWriteback 根本不走预测路由(直接 return writeback-verify),preds 恒空 →
+  // 条数比对本就无法成立。改为:只有 dryRun 下真收到 prediction 类 writes 时才比对,否则交由下面硬判据(allocation 之外不猜)。
   const predIds = preds.filter((w) => w.ok).map((w) => w.id ?? w.about);
   if (preds.length && predIds.length !== ps.length) errors.push(`条数不符:报告 ${ps.length} 条,组织只落 ${predIds.length} 条(判据漂移,ok 不可信)`);
   ps.forEach((p, i) => {
@@ -90,7 +90,7 @@ export function check(text, source = 'report-check') {
 
 // ── 自检:正例必须过,负例必须被咬住(0/0=假绿不适用:至少 1 正 3 负)──
 const CASES = [
-  { name: '正例:合法报告', want: 0, text: '```json\n{"deviation":"无","predictions":[{"about":"校验器能跑通","expect":"exit0","bind":{"action":"写 scripts/ca-report-check.mjs"},"check":{"cmd":"node --check scripts/ca-report-check.mjs","by":"2026-11-13T00:00:00+08:00","mode":"occur"}}],"new_promises":[],"to_calibrate":[],"confidence_changes":[]}\n```' },
+  { name: '正例:合法报告', want: 0, text: '```json\n{"deviation":"无","predictions":[{"about":"校验器能跑通","expect":"exit0","bind":{"action":"写 engine/ca-report-check.mjs"},"check":{"cmd":"node --check scripts/ca-report-check.mjs","by":"2099-01-01T00:00:00+08:00","mode":"occur"}}],"new_promises":[],"to_calibrate":[],"confidence_changes":[]}\n```' },
   { name: '负例:缺 bind', want: 1, text: '```json\n{"deviation":"x","predictions":[{"about":"a","expect":"b","check":{"pattern":"第[0-9]+行"}}]}\n```' },
   { name: '负例:check 全缺', want: 1, text: '```json\n{"deviation":"x","predictions":[{"about":"a","expect":"b","bind":{"action":"改脚本"},"check":{}}]}\n```' },
   { name: '负例:pattern 空泛 .*', want: 1, text: '```json\n{"deviation":"x","predictions":[{"about":"a","expect":"b","bind":{"action":"改脚本"},"check":{"pattern":".*"}}]}\n```' },
@@ -111,11 +111,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (CASES.length < 4 || CASES.filter((c) => c.want !== 0).length < 3) { console.log('FAIL 用例集太薄'); bad++; }
     process.exit(bad ? 1 : 0);
   }
-  // --stat <file>：状态断言工具(2026-11-06 自修:又一次凭记忆报「没动工」，实际早改好了)
+  // stat <file>：状态断言工具(自修:又一次凭记忆报「没动工」，实际早改好了)
   // 只回答两件可以被命令证明的事：文件里实存的 import/require 行、node --check 是否通过。禁猜。
   if (a[0] === '--stat') {
     const f = a[1];
-    if (!f) { console.log('用法:node scripts/ca-report-check.mjs --stat <file>'); process.exit(2); }
+    if (!f) { console.log('用法:node engine/ca-report-check.mjs --stat <file>'); process.exit(2); }
     const abs = path.resolve(f);
     let src;
     try { src = readFileSync(abs, 'utf8'); } catch (e) { console.log(`--stat 读不到:${abs} (${e.code || e.message})`); process.exit(2); }
@@ -129,7 +129,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const KNOWN = new Set(['--stdin', '--last', '--help', '-h', '--stat']);
   const unknown = a.find((x) => x.startsWith('-') && !KNOWN.has(x));
   if (unknown) {
-    console.log(`用法:node scripts/ca-report-check.mjs <file> | --stdin | --last | --selftest\n未知选项:${unknown}`);
+    console.log(`用法:node engine/ca-report-check.mjs <file> | --stdin | --last | --selftest\n未知选项:${unknown}`);
     process.exit(2);
   }
   let text;
@@ -173,7 +173,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log(`[last] ${f}`);
     text = readFileSync(f, 'utf8');
   } else if (a.length === 0) {
-    console.log('用法:node scripts/ca-report-check.mjs <file> | --stdin | --last | --selftest');
+    console.log('用法:node engine/ca-report-check.mjs <file> | --stdin | --last | --selftest');
     process.exit(2);
   } else text = readFileSync(path.resolve(a[0]), 'utf8');
   const r = check(text);

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 // ca-organ.mjs — CA 的思考器官(自立形态:不寄生任何宿主 CLI)
 // 链路:驱动包(DP,ca-compiler 产) → throttleGate 过阀 → 直连 LLM(models.json,经 ca-egress 出口代理)
-//   → 受限工具环(bash 在 ca-sandbox 隔离容器执行,HTTP 传输) → 回写报告解析 → ca-narrative 分级落账。
+// → 受限工具环(bash 在 ca-sandbox 隔离容器执行,HTTP 传输) → 回写报告解析 → ca-narrative 分级落账。
 // 工具面:
-//   bash   — 沙箱内任意 linux 命令(60s 超时,输出截 4000;沙箱无凭据/无网络/仅共享卷=爆炸半径收容)
-//   recall — 经验卡召回(零 LLM 关键词检索,截 2000)
+// bash — 沙箱内任意 linux 命令(60s 超时,输出截 4000;沙箱无凭据/无网络/仅共享卷=爆炸半径收容)
+// recall — 经验卡召回(零 LLM 关键词检索,截 2000)
 // 经济纪律:每轮 LLM 调用前过阀;阀关=如实 THROTTLED 收场不烧重试;usage 每轮落 ledgers/organ.jsonl。
 // 模型路由:env CA_ORGAN_MODEL > models.json「deepseek」条目 > active;glm 强制 thinking budget 512。
 // 用法:
-//   ca-organ.mjs run --stimulus '<文本>' --source <指针> --channel <ch>   # 先编译后思考(全链)
-//   ca-organ.mjs run --dp-file <file> --source <指针> --channel <ch>      # 已编译 DP 直接思考
-//   选项:[--dry-run](只编译/组装,不发 LLM) [--json](机器回执) [--max-rounds N]
+// ca-organ.mjs run --stimulus '<文本>' --source <指针> --channel <ch> # 先编译后思考(全链)
+// ca-organ.mjs run --dp-file <file> --source <指针> --channel <ch> # 已编译 DP 直接思考
+// 选项:[--dry-run](只编译/组装,不发 LLM) [--json](机器回执) [--max-rounds N]
 import { readFileSync, appendFileSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync } from 'node:fs';
 import { spawnSync, spawn } from 'node:child_process';
 import path from 'node:path';
@@ -66,7 +66,7 @@ const ORGAN_SYSTEM = `你是 CA 的思考器官:只依据驱动包工作,不假�
 - edit_file: 锚点替换改既有文件(old_string 须文件内唯一;大文件的唯一改法)——自我进化执行面:改完必自验(node --check 或等价),验证证据进 json 报告。
 输出两部分:①正文=对该驱动包的处置/分析,≤15 行;②末尾附一个 \`\`\`json 代码块=回写报告(正文若已用尽篇幅,json 仍必须完整输出,禁因篇幅省略 check/bind 字段,违者被机械账拒):
 {"deviation":"一句话:实际与预期的偏差","predictions":[{"about":"对什么下预期","expect":"预期会怎样","check":{"pattern":"可机械验证的正则(对后续新事件文本匹配)","by":"ISO截止时间(可空,空=只等匹配)","mode":"occur或absent(默认occur:pattern命中=应验;absent:by前命中=落空)"}}],"new_promises":[{"text":"新承诺(可信可履约)","due":null}],"to_calibrate":[{"target":"相关节点id或null","note":"待校准项"}],"confidence_changes":[{"target":"叙事节点id","to":0.9,"why":"一句话依据"}]}
-每条 prediction 必带 bind(预言绑自身动作,缺则被拒 missing-bind):bind.action=这条预测绑我哪个具体动作(必填,非空字符串,写我能自己做的一步,如「改 scripts/ca-organ.mjs 补契约」);bind.needs=该动作所需前置(可选,字符串或 null)。预测必须能由 bind.action 影响其真假,纯外部运气不许当预测。
+每条 prediction 必带 bind(预言绑自身动作,缺则被拒 missing-bind):bind.action=这条预测绑我哪个具体动作(必填,非空字符串,写我能自己做的一步,如「改 engine/ca-organ.mjs 补契约」);bind.needs=该动作所需前置(可选,字符串或 null)。预测必须能由 bind.action 影响其真假,纯外部运气不许当预测。
 每轮必留至少 1 条 predictions(预测偏差是点火器:check 会被机械对账器逐事件验证,落空自动产 pain 回队);check.pattern 必须是可以拿去匹配事件文本的具体正则,禁空泛;check 亦可用 {"cmd":"<shell 断言>","by":"<ISO>"} 型(deadline 时机械执行,exit0=应验)——队列外世界用 cmd 型,禁对非队列现实用 pattern 型(结构性狼来了)。
 若本驱动包处置的是「预测落空点火」(pain),必附 "pain_deduction":{"pain_ref":"<落空预测id>","stimulus":"<痛一句话>","deduction":"<五步演绎:①直接因②深因③修复方案④验证判据⑤预期结晶>","next":"<下一步最小动作>"}——痛必想,想了必落 conflict 账(五环①→②,禁空想不落账)。
 若你的主线真的变了(批次更替/方向转移,尤其休眠巩固时),附 "storyline_update":"<新主线一句话>"——故事线是你自己的叙事,由你写不由人写;没变就不附,禁例行刷新。
@@ -78,15 +78,15 @@ const ORGAN_SYSTEM = `你是 CA 的思考器官:只依据驱动包工作,不假�
 const TOOLS = [
   { name: 'bash', description: '在隔离沙箱执行 linux 命令(60s 超时,stdout+stderr 截 4000 字;沙箱无凭据/无网络,仅共享卷=爆炸半径收容;cwd=/ca)', input_schema: { type: 'object', properties: { command: { type: 'string', description: '要执行的 shell 命令' } }, required: ['command'] } },
   { name: 'recall', description: 'CA 经验卡召回(零 LLM 关键词检索,输出截 2000 字)', input_schema: { type: 'object', properties: { query: { type: 'string', description: '检索词' } }, required: ['query'] } },
-  { name: 'read_file', description: '读 CA 领地内文件(截 8000 字;比 bash cat 省轮次)', input_schema: { type: 'object', properties: { path: { type: 'string', description: 'CA 家相对路径,如 scripts/ca-cli.mjs' } }, required: ['path'] } },
+  { name: 'read_file', description: '读 CA 领地内文件(截 8000 字;比 bash cat 省轮次)', input_schema: { type: 'object', properties: { path: { type: 'string', description: 'CA 家相对路径,如 engine/ca-organ.mjs' } }, required: ['path'] } },
   { name: 'write_file', description: '新建/整写 CA 领地内小文件(自动备份;账本/队列物理拒写)', input_schema: { type: 'object', properties: { path: { type: 'string', description: 'CA 家相对路径' }, content: { type: 'string', description: '完整新内容(整写,禁补丁式)' } }, required: ['path', 'content'] } },
   { name: 'edit_file', description: '锚点替换改既有文件(大文件唯一改法:old_string 精确匹配唯一处换 new_string;自动备份;账本/队列物理拒写;改完必自验)', input_schema: { type: 'object', properties: { path: { type: 'string' }, old_string: { type: 'string', description: '被替换的原文(须在文件内唯一)' }, new_string: { type: 'string' } }, required: ['path', 'old_string', 'new_string'] } },
 ];
 
 // bash 传输层:HTTP 调 ca-sandbox 的常驻壳 exec 服务(沙箱侧单进程长命 bash,cwd/env/变量轮间全续,
-//   哨兵回执协议在沙箱内完成;沙箱无凭据/无网络/仅共享卷——它炸得只剩自己)。
+// 哨兵回执协议在沙箱内完成;沙箱无凭据/无网络/仅共享卷——它炸得只剩自己)。
 // 串行闸:同轮并行 bash 若共享沙箱常驻壳会互覆回执缓冲=双双超时白烧——bash 强制排队一次一个;
-//   read_file/recall 等无共享态工具不受影响仍并行。
+// read_file/recall 等无共享态工具不受影响仍并行。
 let shellChain = Promise.resolve();
 export function shellExec(cmd, timeoutMs = BASH_TIMEOUT_MS) {
   const p = shellChain.then(() => shellExecRaw(cmd, timeoutMs));
@@ -127,7 +127,7 @@ async function execTool(name, input) {
     try { return readFileSync(abs, 'utf8').slice(0, 8000); } catch (e) { return `CA-REFUSE: ${String(e).slice(0, 120)}`; }
   }
   if (name === 'write_file') {
-    // 自我进化执行面(2026-11-06 用户令「持续的编码能力」):整写+自动备份;append-only 面物理拒写(账本纪律非仪式)
+    // 自我进化执行面:整写+自动备份;append-only 面物理拒写(账本纪律非仪式)
     const rel = String(input?.path ?? '');
     const abs = path.resolve(CA, rel);
     const content = String(input?.content ?? '');
@@ -163,18 +163,18 @@ async function execTool(name, input) {
   return `CA-REFUSE: 白名单外工具 ${name}`;
 }
 
-// ── 单轮 LLM 调用(过阀;usage 如实返回;channel=user=P1 用户令,预算封顶档仍放行) ──
+// ── 单轮 LLM 调用(过阀;usage 如实返回;channel=user=P1,预算封顶档仍放行) ──
 // toolsOn=false=物理零工具(请求不发 tools 字段,模型无枪可指;--no-tools 真零形态)
 async function callLlm(m, key, messages, maxTok, channel, toolsOn) {
   const gate = throttleGate({ surface: 'organ:think', purpose: channel === 'user' ? 'P1 user-order' : `autonomous:${channel}` });
-  if (!gate.allowed) { // 阀关也要有账:每次被闸都有物理行(2026-11-06 补:静默 skip=跳过无账)
+  if (!gate.allowed) { // 阀关也要有账:每次被闸都有物理行(补:静默 skip=跳过无账)
     const rec = { ts: new Date().toISOString(), id: process.env.CA_EVENT_ID ?? null, surface: 'organ:think', channel, reason: String(gate.notice).slice(0, 200), src: process.env.CA_SOURCE ?? null };
     try { appendFileSync(new URL('../state/skipped-ledger.jsonl', import.meta.url), JSON.stringify(rec) + '\n'); } catch { /* 跳过账坏不毁器官 */ }
     try { console.error(`[throttled] ${String(gate.notice).slice(0, 120)}`); } catch {}
     return { throttled: gate.notice, recorded: true };
   }
-  // stream:true(2026-11-06 器官自改:非流式 fetch 头阻塞,长思考超过网关静默超时即整轮白烧;
-  //   流式=首 token 即到,SSE delta 在本函数内拼回 Anthropic messages 完整 j 形状,下游 think/routeWriteback 零改动)
+  // stream:true(器官自改:非流式 fetch 头阻塞,长思考超过网关静默超时即整轮白烧;
+  // 流式=首 token 即到,SSE delta 在本函数内拼回 Anthropic messages 完整 j 形状,下游 think/routeWriteback 零改动)
   const body = { model: m.model, max_tokens: maxTok, system: ORGAN_SYSTEM, messages, stream: true };
   if (toolsOn) body.tools = TOOLS;
   // GLM 思考不可关(20261028 卡):budget 512+max_tokens 双留量;deepseek 非思考=纯正文帽
@@ -186,7 +186,7 @@ async function callLlm(m, key, messages, maxTok, channel, toolsOn) {
     signal: AbortSignal.timeout(180_000),
   });
   if (!r.ok) throw new Error(`${m.name || m.id} HTTP ${r.status}:${(await r.text()).slice(0, 160)}`);
-  // 网关未按 SSE 回(老代理/回退)时向后兼容:非 event-stream 直接 json()
+  // 网关未按 SSE 回(老代理/回退)时向后兼容:非 event-stream 直接 json
   const ct = String(r.headers.get('content-type') ?? '');
   if (!ct.includes('text/event-stream') || !r.body) return { j: await r.json() };
   const j = await readAnthropicSse(r.body);
@@ -259,19 +259,19 @@ async function readAnthropicSse(stream) {
   return j;
 }
 
-// 硬止损(2026-11-06 卡死实弹:AbortSignal.timeout(180s) 兜不住流式挂起——器官空转 7min 被 loop 600s 钝刀杀,
-//   队首阻塞用户消息挨饿)。Promise.race 独立计时器:无论 fetch/SSE 为何不落,到点必脱身。
-// 2026-11-06 改:上限取 min(默认200s, loop 预算)。原先常量在预算小时先于预算自帽触发,
-//   预算自帽形同虚设;此处收成上限,think() 内再按 BUDGET_MS 二段钳。
+// 硬止损(:AbortSignal.timeout(180s) 兜不住流式挂起——器官空转 7min 被 loop 600s 钝刀杀,
+// 队首阻塞用户消息挨饿)。Promise.race 独立计时器:无论 fetch/SSE 为何不落,到点必脱身。
+// 改:上限取 min(默认200s, loop 预算)。原先常量在预算小时先于预算自帽触发,
+// 预算自帽形同虚设;此处收成上限,think 内再按 BUDGET_MS 二段钳。
 export function hardCapMs(budgetMs, env = process.env) {
   const want = Number(env.CA_ORGAN_LLM_HARD_MS ?? 200_000);
   const b = Number(budgetMs ?? env.CA_ORGAN_BUDGET_MS ?? 0);
   const safeBudget = (b > 0) ? Math.max(1_000, b - 1_000) : 0; // 自留 1s 收口余量
   return (safeBudget > 0) ? Math.min(want, safeBudget) : want;
 }
-// 2026-11-06 清死常量:此处原 const LLM_HARD_MS = hardCapMs() 是模块导入期一次性求值,
-//   那时 CA_ORGAN_BUDGET_MS 未必存在(由 loop 逐次 spawn 注入),算出的值只等于默认上限,
-//   真实生效的是 think() 内按次求值的 LLM_CAP_MS(339 行)。留着会误导后人以为有两条钳位。
+// 清死常量:此处原 const LLM_HARD_MS = hardCapMs 是模块导入期一次性求值,
+// 那时 CA_ORGAN_BUDGET_MS 未必存在(由 loop 逐次 spawn 注入),算出的值只等于默认上限,
+// 真实生效的是 think 内按次求值的 LLM_CAP_MS(339 行)。留着会误导后人以为有两条钳位。
 export function hardRace(p, ms, label) {
   let t;
   const to = new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error(`llm-hard-timeout:${label} ${Math.round(ms / 1000)}s`), { hardTimeout: true })), ms); });
@@ -279,9 +279,9 @@ export function hardRace(p, ms, label) {
 }
 
 // ── 思考主环(工具循环 ≤MAX_TOOL_ROUNDS) ──
-// L2 软着陆续跑档·纯判据(2026-11-06 用户令「上下文割裂/执行力根治」;素料 docs/2026-11-06-OpenClaude细读-L2换窗与软着陆续跑设计素料.md §二):
-//   自然停(无工具调用)时 output 未到预算 90% = 提前交差 → 注 nudge 续跑;递减回报早停(续 ≥3 次且最近两轮增量各 <500 tok)=磨洋工判停;
-//   防环=续跑硬帽 5 次 + trace 落 transition。纯函数零 LLM,可机验(烟测走 import,不烧阀)。
+// L2 软着陆续跑档·纯判据(;素料 docs/-细读-L2换窗与软着陆续跑设计素料.md §二):
+// 自然停(无工具调用)时 output 未到预算 90% = 提前交差 → 注 nudge 续跑;递减回报早停(续 ≥3 次且最近两轮增量各 <500 tok)=磨洋工判停;
+// 防环=续跑硬帽 5 次 + trace 落 transition。纯函数零 LLM,可机验(烟测走 import,不烧阀)。
 export function softLanding({ out, budget, conts, deltas }) {
   if (!(budget > 0)) return { go: false, reason: 'off' };
   if (out >= budget * 0.9) return { go: false, reason: 'budget-reached' };
@@ -296,7 +296,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
   const key = keyOf(m);
   if (!key && m.keyEnv) die(`模型 ${m.id} 缺 key(环境变量 ${m.keyEnv} 未注入)——如实报错,禁静默`);
   const messages = [{ role: 'user', content: dp }];
-  // 钱闸前置(2026-11-06 主线):烧钱前先读钱包,额度尽=非用户令不启动——禁先烧后算
+  // 钱闸前置(主线):烧钱前先读钱包,额度尽=非
   {
     const spent = Number(process.env.CA_ORGAN_SPENT_CNY ?? 0);
     if (!spent) {
@@ -304,8 +304,8 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
         const { walletToday } = await import('./ca-wallet.mjs');
         const w = walletToday();
         if (w && w.remainingCny <= 0 && !process.env.CA_FORCE && channel !== 'user') die(`钱闸:今日额度已尽(burned ¥${w.burnedCny}/${w.allowanceCny})→非用户令不启动`);
-        // 底线闸(2026-11-06 晚 CA 自修):余额≤¥0.10(一格调用都撑不满)等同钱尽——剩 0.0912 仍放行过一次,是小口径漏洞
-        //   补(同晚验收):两道闸都漏了 channel==='user' 豁免——用户令 P1 放行是旧制(callLlm 同口径),die 文案自称「非用户令」代码却没判,实弹把用户件闸死在 200ms 内
+        // 底线闸(晚 CA 自修):余额≤¥0.10(一格调用都撑不满)等同钱尽——剩 0.0912 仍放行过一次,是小口径漏洞
+        // 补(同晚验收):两道闸都漏了 channel==='user' 豁免——),die 文案自称「非代码却没判,把用户件闸死在 200ms 内
         if (w && w.remainingCny <= 0.1 && !process.env.CA_FORCE && channel !== 'user') die(`钱闸:余额见底 ¥${w.remainingCny}(≤¥0.1,不足一次调用)→非用户令不启动`);
         if (w && process.env.CA_ORGAN_TRACE) { try { appendFileSync(process.env.CA_ORGAN_TRACE, JSON.stringify({ ts: new Date().toISOString(), phase: 'wallet-gate', remaining: w.remainingCny, pct: w.pct }) + '\n'); } catch { /* 留痕失败不挡钱闸 */ } }
       } catch (e) { if (String(e?.message || '').startsWith('钱闸')) throw e; /* 钱包面坏不挡思考但留痕 */ }
@@ -329,7 +329,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
   const t0 = Date.now();
   // 预算自帽(loop 经 CA_ORGAN_BUDGET_MS 传,小于其 spawnSync 钝刀):自留收口时间,禁被整锅端
   const BUDGET_MS = Number(process.env.CA_ORGAN_BUDGET_MS ?? 0);
-  // 硬超时受预算约束(mw4xy 落空补):单轮硬超时不得超过 loop 给的预算,否则一整锅被钝刀端掉,预算自帽成摆设
+  // 硬超时受预算约束:单轮硬超时不得超过 loop 给的预算,否则一整锅被钝刀端掉,预算自帽成摆设
   const LLM_CAP_MS = hardCapMs(BUDGET_MS); // 单一入口:任何时候单轮硬超时 ≤ 预算-1s 且 ≤ 上限
   const trace = (obj) => { if (process.env.CA_ORGAN_TRACE) { try { appendFileSync(process.env.CA_ORGAN_TRACE, JSON.stringify({ ts: new Date().toISOString(), ...obj }) + '\n'); } catch { /* 追踪失败不挡思考 */ } } };
   for (let round = 0; round <= maxRounds; round++) {
@@ -353,7 +353,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
     const text = blocks.filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('');
     const calls = blocks.filter((b) => b?.type === 'tool_use');
     if (text) finalText = text;
-    if (!calls.length) { // 无工具调用=自然停;但软着陆档开=「预算未到 90% 不准交差」,注 nudge 续跑(CC tokenBudget 同构)
+    if (!calls.length) { // 无工具调用=自然停;但软着陆档开=「预算未到 90% 不准交差」,注 nudge 续跑(tokenBudget 同构)
       const delta = usageTot.out - lastOut; lastOut = usageTot.out;
       if (OUT_BUDGET > 0) contDeltas.push(delta);
       const sl = softLanding({ out: usageTot.out, budget: OUT_BUDGET, conts, deltas: contDeltas });
@@ -368,7 +368,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
       break;
     }
     if (round === maxRounds) {
-      // 强制收官轮(2026-11-06 实弹:轮帽打断=reportParsed false 连发;脱工具再叫一轮,必须交正文+json 报告)
+      // 强制收官轮(:轮帽打断=reportParsed false 连发;脱工具再叫一轮,必须交正文+json 报告)
       messages.push({ role: 'assistant', content: blocks });
       messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: calls[0].id, content: '〔系统〕工具轮帽用尽,禁再调工具' }, ...calls.slice(1).map((c) => ({ type: 'tool_result', tool_use_id: c.id, content: '〔系统〕同上' })), { type: 'text', text: '轮帽用尽。立即用现有证据收口:正文+末尾 ```json 报告(predictions 至少1条,执行轮必含 execution)。现在就给,禁再调查。' }] });
       const fin = await hardRace(callLlm(m, key, messages, 4000, channel, false), LLM_CAP_MS, 'final').catch(() => null); // 收官轮硬超时=保已有正文,不再烧
@@ -381,7 +381,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
       break;
     }
     messages.push({ role: 'assistant', content: blocks });
-    // 工具环追踪(2026-11-06 用户令「看不到 bash loop」:轨迹落盘,cli 可实时渲染)
+    // 工具环追踪(:轨迹落盘,cli 可实时渲染)
     if (process.env.CA_ORGAN_TRACE) {
       try {
         for (const c of calls) appendFileSync(process.env.CA_ORGAN_TRACE, JSON.stringify({ ts: new Date().toISOString(), round, tool: c.name, phase: 'start', input: JSON.stringify(c.input ?? {}).slice(0, 120) }) + '\n');
@@ -395,8 +395,8 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
         calls.forEach((c, i) => appendFileSync(process.env.CA_ORGAN_TRACE, JSON.stringify({ ts: new Date().toISOString(), round, tool: c.name, phase: 'end', rc: String(results[i] ?? '').slice(0, 3), out: String(results[i] ?? '').replace(/\s+/g, ' ').slice(0, 100) }) + '\n'));
       } catch { /* */ }
     }
-    // L0 残渣清账(批3 2026-11-06 批复;CC microCompact 同构):大工具结果不全文进上下文——全文落 spill,
-    //   上下文只留头部+可重建指针(要细节用工具读文件)。残渣在盘不在脑,token 经济软梯第一级。
+    // L0 残渣清账(;microCompact 同构):大工具结果不全文进上下文——全文落 spill,
+    // 上下文只留头部+可重建指针(要细节用工具读文件)。残渣在盘不在脑,token 经济软梯第一级。
     const spill = (r, i) => {
       const s = String(r ?? '');
       if (s.length <= 3000) return s;
@@ -410,10 +410,10 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
     };
     messages.push({ role: 'user', content: [...calls.map((c, i) => ({ type: 'tool_result', tool_use_id: c.id, content: spill(results[i], i) })), ...budget] });
   }
-  // 补票轮(2026-11-06 用户令「把牙齿彻底长出来,别让思考变成白烧的幻觉」):正文已出但回写报告缺失=本轮白烧
-  // ——带全上下文无工具补发一次(只交报告);usage 如实并账;仍缺=CLI 落摩擦账(牙)
+  // 补票轮(,别让思考变成白烧的幻觉」):正文已出但回写报告缺失=本轮白烧
+  // 带全上下文无工具补发一次(只交报告);usage 如实并账;仍缺=CLI 落摩擦账(牙)
   let reportText = finalText;
-  let repaired = 'none'; // 补票成色:实弹统计用(none=一次过|saved=补票救回|failed=补票仍败)
+  let repaired = 'none'; // 补票成色:统计用(none=一次过|saved=补票救回|failed=补票仍败)
   if (!throttled && rounds > 0 && !extractReport(reportText)) {
     trace({ phase: 'repair-start' });
     messages.push({ role: 'user', content: '〔系统〕你的回写报告(json 块)缺失或解析失败——没有报告,本轮思考=白烧。现在只发报告本体:一个 ```json 代码块,含 predictions(≥1 条,每条带 bind.action 和 check.pattern 或 check.cmd)。禁正文、禁解释、禁道歉。' });
@@ -430,7 +430,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
 }
 
 // ── 回写路由(复用 ca-think 链路:全经 ca-narrative,禁旁路;失败逐条落账禁中断) ──
-// 报告抽取器(2026-11-06 加固:实弹 19% 解析失败白烧)——三级提取:```json 围栏 → 任意围栏 → 裸末段含 "predictions" 的平衡花括号
+// 报告抽取器(加固: 19% 解析失败白烧)——三级提取:```json 围栏 → 任意围栏 → 裸末段含 "predictions" 的平衡花括号
 function extractReport(answer) {
   const t = String(answer ?? '');
   const candidates = [...t.matchAll(/```json\s*([\s\S]*?)```/g)].map((m) => m[1]);
@@ -471,7 +471,7 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
       if (!cc?.target || !(cc.to > 0 && cc.to <= 1)) continue;
       writes.push({ kind: 'calibration', target: cc.target, ...narr(['calibrate', String(cc.target), '--confidence', String(cc.to), '--evidence', source]) });
     }
-    // 续作自投(2026-11-06 用户令「不能像CC那样持续工作」:器官给自己的下一步投事件;≤2/轮;队列同类在排≥2=熔断防自激)
+    // 续作自投(:器官给自己的下一步投事件;≤2/轮;队列同类在排≥2=熔断防自激)
     const fups = (report?.followups ?? []).filter((f) => String(f ?? '').trim()).slice(0, 2);
     if (fups.length) {
       try {
@@ -487,12 +487,12 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
         }
       } catch (e) { writes.push({ kind: 'followup', ok: false, err: String(e).slice(0, 80) }); }
     }
-    // 故事线自写(2026-11-06 用户令「他要有自己的叙事」:主线由器官写不由人写;经 narr CLI 单源)
+    // 故事线自写(:主线由器官写不由人写;经 narr CLI 单源)
     if (report?.storyline_update) {
       writes.push({ kind: 'storyline', ...narr(['add', 'storyline', '--payload', JSON.stringify({ text: String(report.storyline_update).slice(0, 120) }), '--source', source, '--confidence', '0.8']) });
     }
-    // 痛→演绎(批I 2026-11-06 红队根治「五环①→②断链」:pain 消化必落 inner-speech-deduction,带 pain_ref 外键;
-    //   conflict.jsonl=原始流水账非叙事图,直落不经 narr CLI——与 friction.jsonl 同格)
+    // 痛→演绎(:pain 消化必落 inner-speech-deduction,带 pain_ref 外键;
+    // conflict.jsonl=原始流水账非叙事图,直落不经 narr CLI——与 friction.jsonl 同格)
     const pd = report?.pain_deduction;
     if (pd?.deduction) {
       const d = new Date();
@@ -516,16 +516,16 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
         reject('missing-about-expect-check', 'about/expect/check(pattern|cmd) 至少一件缺失');
         continue;
       }
-      // 2026-11-06 自修(pred 误押外部对象落空):check 用 pattern 去匹外部事件文本=押别人怎么说话,非自身动作。
-      //   启发式:about/expect 里出现「下一条 user/用户会/系统会」等外部主体措辞 -> 记 warn 不拒(留证据,供后续收紧)。
+      // 自修(pred 误押外部对象落空):check 用 pattern 去匹外部事件文本=押别人怎么说话,非自身动作。
+      // 启发式:about/expect 里出现「下一条 user/用户会/系统会」等外部主体措辞 -> 记 warn 不拒(留证据,供后续收紧)。
       try {
         const objText = String(pr?.about ?? '') + ' ' + String(pr?.expect ?? '');
         if (/(下一条|下一次)?\s*(user|用户|系统|队列)\s*(的)?(事件|消息|话|输入)?[^。]{0,12}(会|是|为)/i.test(objText)) {
           writes.push({ kind: 'prediction-warn', reason: 'external-object', about: objText.slice(0, 80), note: '预测对象像外部主体,须确认 bind.action 能影响其真假' });
         }
       } catch {}
-      // 2026-11-06 自修(pain pred-mw4gvluo-s1e9 误报):身份类 absent 预测的 pattern 若含纯技术词(封装/调用封装/wrapper 裸用),
-      //   会把「代码里的 LLM 调用封装」误判成「CA 是海外框架壳」=词形狼来了。只保留明确指向身份的表述才算数。
+      // 自修(pain 误报):身份类 absent 预测的 pattern 若含纯技术词(封装/调用封装/wrapper 裸用),
+      // 会把「代码里的 LLM 调用封装」误判成「CA 是海外框架壳」=词形狼来了。只保留明确指向身份的表述才算数。
       try {
         const pat = String(pr?.check?.pattern ?? '');
         const hasIdentity = /(套壳|壳子|搬(自|的)|based on|built on|二次封装|包装成|改个名字|换皮)/i.test(pat);
@@ -538,17 +538,17 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
         reject('missing-bind', 'bind.action 为空:预测未绑自身具体动作');
         continue;
       }
-      // 2026-11-06 自修(check-shape 守卫接线):check 既无 pattern 也无 cmd = 空泛预测,机器对账不了=狼来了。
-      //   守卫体在 scripts/ca-pred-shape.mjs(已自测),此处只做入口拒收,措辞/拒收落账沿用 missing-bind 同款。
+      // 自修(check-shape 守卫接线):check 既无 pattern 也无 cmd = 空泛预测,机器对账不了=狼来了。
+      // 守卫体在 engine/ca-pred-shape.mjs(已自测),此处只做入口拒收,措辞/拒收落账沿用 missing-bind 同款。
       try {
         if (typeof checkShape === 'function') {
           const shapeErr = checkShape(pr);
           if (shapeErr) { reject(shapeErr.split(':')[0], shapeErr); continue; }
         }
       } catch (e) { writes.push({ kind: 'prediction-warn', reason: 'check-shape-crash', err: String(e).slice(0, 80) }); }
-      // 2026-11-06 乌龙平反批(用户令+场外运维,pred-mw4qbkki-ieie 冤案真身):pattern 含裸「解析失败」=结构性自咬——
-      //   代谢张力事件文案常驻「解析失败率 x%」,loop 逐事件对账必中,absent 必落空/occur 必假应验。
-      //   要对解析健康下注:改用具体错误眼(如「error: report missing」)匹事件文本,或 check.cmd 机械断 organ.jsonl(队列外现实禁 pattern 型,同 §75 律)。
+      // (, 冤案真身):pattern 含裸「解析失败」=结构性自咬——
+      // 代谢张力事件文案常驻「解析失败率 x%」,loop 逐事件对账必中,absent 必落空/occur 必假应验。
+      // 要对解析健康下注:改用具体错误眼(如「error: report missing」)匹事件文本,或 check.cmd 机械断 organ.jsonl(队列外现实禁 pattern 型,同 §75 律)。
       try {
         const pat = String(pr?.check?.pattern ?? '');
         if (pat && /解析失败/.test(pat)) {
@@ -557,10 +557,10 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
         }
       } catch { /* 守卫坏不毁路由 */ }
       const id = `pred-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      // 2026-11-06 自修:bind 只到账不进队列=哑账(pred-mw49nolo 落空根因:承诺在 bind 里,但队列看不见,下一轮就忘)。
-      //   写入时把 bind.action 同步立成 organ-followup 刺激回队,闭环缺口=队列里一条待办实卡。
+      // 自修:bind 只到账不进队列=哑账(落空根因:承诺在 bind 里,但队列看不见,下一轮就忘)。
+      // 写入时把 bind.action 同步立成 organ-followup 刺激回队,闭环缺口=队列里一条待办实卡。
       try {
-        // 2026-11-06 自修(pred-bind 与执行轮互斥空转):纯待命动作标 [pred-bind:idle],下游不再据此追责「未动手」。
+        // 自修(pred-bind 与执行轮互斥空转):纯待命动作标 [pred-bind:idle],下游不再据此追责「未动手」。
         let bindPrefix = '[pred-bind] ';
         try { if (typeof bindTag === 'function') bindPrefix = bindTag(pr.bind.action); } catch {}
         const bindEv = { id: `ev-bind-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, type: 'organ-followup', text: `${bindPrefix}${String(pr.bind.action).slice(0, 180)}`, from: source, ts: new Date().toISOString() };
@@ -572,9 +572,9 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
       catch (e) { writes.push({ kind: 'prediction', id, ok: false, err: String(e).slice(0, 80) }); }
     }
   }
-  // 割裂②回写闭环校验(2026-11-06 根治批·用户令):「我记住了」不许是台词——直写账(prediction/deduction/followup)
-  //   逐条复读账本尾部断言 id 真在;缺席=当场落 friction + 投 pain 事件(疼到下轮补课),不许静默蒸发。
-  //   窗口随本轮直写量伸缩(压测实弹:35 条一批时固定 30 窗把前 5 条挤出=假回写误报;窗=30 兜底+本轮直写数)
+  // 割裂②回写闭环校验(·):「我记住了」不许是台词——直写账(prediction/deduction/followup)
+  // 逐条复读账本尾部断言 id 真在;缺席=当场落 friction + 投 pain 事件(疼到下轮补课),不许静默蒸发。
+  // 窗口随本轮直写量伸缩(压测:35 条一批时固定 30 窗把前 5 条挤出=假回写误报;窗=30 兜底+本轮直写数)
   const VERIFY_BACK = { prediction: PRED_LEDGER, deduction: CONFLICT_LEDGER, followup: path.join(CA, 'state', 'event-queue.jsonl') };
   const verifyN = writes.filter((w) => w.ok && w.id && VERIFY_BACK[w.kind]).length;
   const verifyFails = [];
@@ -622,7 +622,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const r = await think(dp, { source, channel, maxRounds, dryRun });
   if (r.dryRun) { console.log(JSON.stringify(r)); process.exit(0); }
   const wb = r.throttled ? { report: null, writes: [] } : routeWriteback(r.reportText ?? r.text, { source, dryRun });
-  // 牙(2026-11-06 用户令):补票后仍无报告=思考白烧,落摩擦账——机械可见,会疼,结晶面会咬到
+  // 牙:补票后仍无报告=思考白烧,落摩擦账——机械可见,会疼,结晶面会咬到
   if (!r.throttled && !wb.report && !dryRun) {
     try { mkdirSync(path.dirname(FRICTION), { recursive: true }); appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'report-parse-fail', surface: 'organ-writeback', detail: `回写报告补票后仍缺失:本轮思考白烧(${String(r.text).slice(0, 60).replace(/\s+/g, ' ')})`, evidence: `ledger:${source}`, verified: true }) + '\n'); } catch { /* 落账失败不挡输出 */ }
   }
@@ -633,11 +633,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     in: r.usage.in, out: r.usage.out, cacheRead: r.usage.cacheRead,
     throttled: !!r.throttled, degraded: r.degraded ?? null, repair: r.repaired ?? 'none', reportParsed: !!wb.report, execution: !!(wb.report?.execution?.evidence),
     writes: wb.writes.map((w) => ({ kind: w.kind, ok: w.ok })),
-    // 2026-11-06 断链修复(CC 指出):decision.jsonl 的 classifyConfidence 读本行 confidence/selfRating,
+    // 断链修复(指出):decision.jsonl 的 classifyConfidence 读本行 confidence/selfRating,
     // 此前本行从不写 → decide.confidence 恒 null。如实透传报告自评,未自评=null(不脑补)。
     confidence: wb.report?.confidence ?? wb.report?.selfRating ?? null,
   }) + '\n');
-  // 还账:本轮产出计入任务烧量(taskId 在 think() 内是局部量——此处 CLI 块须自重读 env,跨函数不共享作用域)
+  // 还账:本轮产出计入任务烧量(taskId 在 think 内是局部量——此处 CLI 块须自重读 env,跨函数不共享作用域)
   const chargeTaskId = process.env.CA_ORGAN_TASK || null;
   if (chargeTaskId && r.usage?.out) { try { const { chargeTask } = await import('./ca-task.mjs'); chargeTask(chargeTaskId, r.usage.out); } catch { /* 还账失败不毁输出 */ } }
   if (asJson) {
