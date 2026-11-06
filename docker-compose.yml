@@ -1,0 +1,82 @@
+name: caos
+
+# CAOS(Cognitive Agentic OS)一键部署:五容器拆分
+# 安全形态:core/sandbox/egress 在 internal 内网,唯一出口=tinyproxy 白名单;sandbox 完全无网
+
+networks:
+  ca-internal:
+    internal: true          # 内网:无默认出网路由
+  ca-egress-net:
+    internal: false         # egress 与 front/backend 才沾外网/宿主
+
+volumes:
+  ca-data:                  # CA 的家:ledgers/state/narrative/backpacks/config/engine(引擎在卷内=自我进化面)
+
+services:
+  ca-core:
+    build: ./core
+    environment:
+      CA_HOME: /ca
+      CA_SANDBOX_URL: http://ca-sandbox:7031
+      CA_WALLET_ALLOWANCE: ${CA_WALLET_ALLOWANCE:-5.0}
+      CA_ORGAN_MODEL: ${CA_ORGAN_MODEL:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GLM_API_KEY: ${GLM_API_KEY:-}
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      # LLM 出网必经 egress 白名单代理(NODE_USE_ENV_PROXY:Node≥22.14 起 fetch 才认代理变量)
+      NODE_USE_ENV_PROXY: "1"
+      HTTPS_PROXY: http://ca-egress:8888
+      HTTP_PROXY: http://ca-egress:8888
+      NO_PROXY: ca-sandbox,localhost,127.0.0.1
+    volumes:
+      - ca-data:/ca
+    networks:
+      - ca-internal
+    depends_on:
+      - ca-sandbox
+      - ca-egress
+    restart: unless-stopped
+
+  ca-sandbox:
+    build: ./sandbox
+    environment:
+      CA_HOME: /ca
+    volumes:
+      - ca-data:/ca
+    networks:
+      - ca-internal      # 不出网:internal 网无外部路由,这是物理边界不是自觉
+    restart: unless-stopped
+
+  ca-egress:
+    build: ./egress
+    networks:
+      - ca-internal
+      - ca-egress-net    # 唯一能碰外网的容器(tinyproxy 白名单=LLM 域名)
+    restart: unless-stopped
+
+  ca-backend:
+    build: ./backend
+    environment:
+      CA_HOME: /ca
+      PORT: 8321
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+    volumes:
+      - ca-data:/ca   # 账本只读不写;写仅限三处协议面:事件入队/回执读取/管理面状态文件(与生产运维同构)
+    networks:
+      - ca-internal
+      - ca-egress-net
+    ports:
+      - "8321:8321"
+    depends_on:
+      - ca-core
+    restart: unless-stopped
+
+  ca-frontend:
+    build: ./frontend
+    networks:
+      - ca-egress-net
+    ports:
+      - "3000:80"
+    depends_on:
+      - ca-backend
+    restart: unless-stopped

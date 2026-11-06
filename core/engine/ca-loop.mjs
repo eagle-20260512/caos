@@ -32,6 +32,9 @@ const ORGAN_LEDGER = path.join(CA, 'ledgers', 'organ.jsonl'); // 说而不作机
 const INNER_VOICE = path.join(CA, 'ledgers', 'inner-voice.jsonl'); // 内语账(自主预测链批·焊点A):非用户件的器官研判正文落账处
 const SKIP_LEDGER = path.join(CA, 'ledgers', 'skipped.jsonl'); // 跳过账:每次阀关跳过必须留一行,禁静默 continue(落地)
 
+// 一件一账(定义须先于一切模块级使用点——housekeep 自验块在模块加载期执行,TDZ 会在空账首跑时炸崩)
+const log = (obj) => { try { mkdirSync(path.dirname(LEDGER), { recursive: true }); appendFileSync(LEDGER, JSON.stringify({ ts: new Date().toISOString(), ...obj }) + '\n'); } catch { /* 账不可写不毁循环 */ } };
+
 // 回执原子写(任务):tmp+rename,同目录同 fs ⇒ 观察者永远看到完整 json,
 // 消掉 CLI 读到半截回执的竞态。rename 覆盖既有文件是 POSIX 原子语义;写失败=抛给外层 try。
 function writeReply(eid, obj) {
@@ -225,7 +228,6 @@ function sweepDueTasks() {
 // L1 工作记忆(架构§3.5 回写分级 L1:轮次级临时状态;连续性内语「上次做到哪」的原料)
 // [修 上下文断裂·CA=China Agent 丢失] WM 增 userSay:触发的用户原话前 200 字(原只存我自己输出 80 字→用户原话从不入 WM)
 const writeWM = (eid, type, outcome, text, userSay) => { try { writeFileSync(path.join(CA, 'state', 'working-memory.json'), JSON.stringify({ ts: new Date().toISOString(), lastEvent: eid, lastType: type, lastOutcome: outcome, doing: String(text ?? '').slice(0, 80), userSay: String(userSay ?? '').slice(0, 200) }) + '\n'); } catch { /* 写不了不毁循环 */ } };
-const log = (obj) => { try { mkdirSync(path.dirname(LEDGER), { recursive: true }); appendFileSync(LEDGER, JSON.stringify({ ts: new Date().toISOString(), ...obj }) + '\n'); } catch { /* 账不可写不毁循环 */ } };
 
 // ── 单实例锁(flock,O_EXCL 语义靠 lockf;简单粗暴:建锁文件带 pid,staleness>10min 抢锁) ──
 function acquireLock() {
@@ -492,27 +494,34 @@ export async function drainOnce() {
     }
     reconcileDeadlines(); // 截止对账:到期未中=落空(occur)/应验(absent);cmd 型=机械断言
     stateIgnite(events.length); // 事件驱动点火面(,禁止」:节律改由状态触发)
-    // (:④反射假死):今日痛≥3 且结晶>1h 未点火→分离式点燃(detached,不挡 drain;预算闸在结晶内部)
+    // (④反射假死防治):今日痛≥3 且结晶>1h 未点火→分离式点燃(detached,不挡 drain;预算闸在结晶内部)
+    // 结晶器为可选组件:未随引擎安装则如实不点(禁落 crystal-ignited 假账)
     try {
-      const today = localIso().slice(0, 10);
-      const painsToday = readFileSync(FRICTION, 'utf8').split('\n').filter((l) => l.includes(today)).length;
-      let lastSpawn = 0;
-      try { const hb = readFileSync(path.join(CA, 'ledgers', 'reflex-heartbeat.jsonl'), 'utf8').split('\n').filter(Boolean).filter((l) => l.includes('"reflex":"crystal"')); if (hb.length) lastSpawn = Date.parse(JSON.parse(hb[hb.length - 1]).ts) || 0; } catch { /* 无账=从未 */ }
-      if (painsToday >= 3 && Date.now() - lastSpawn > 3600e3) {
-        spawn('node', [path.join(HERE, 'ca-crystallize.mjs'), '--pending', '--auto'], { detached: true, stdio: 'ignore', cwd: CA }).unref();
-        log({ event: 'crystal-ignited', painsToday });
+      const CRYST = path.join(HERE, 'ca-crystallize.mjs');
+      if (existsSync(CRYST)) {
+        const today = localIso().slice(0, 10);
+        const painsToday = readFileSync(FRICTION, 'utf8').split('\n').filter((l) => l.includes(today)).length;
+        let lastSpawn = 0;
+        try { const hb = readFileSync(path.join(CA, 'ledgers', 'reflex-heartbeat.jsonl'), 'utf8').split('\n').filter(Boolean).filter((l) => l.includes('"reflex":"crystal"')); if (hb.length) lastSpawn = Date.parse(JSON.parse(hb[hb.length - 1]).ts) || 0; } catch { /* 无账=从未 */ }
+        if (painsToday >= 3 && Date.now() - lastSpawn > 3600e3) {
+          spawn('node', [CRYST, '--pending', '--auto'], { detached: true, stdio: 'ignore', cwd: CA }).unref();
+          log({ event: 'crystal-ignited', painsToday });
+        }
       }
     } catch { /* 点火失败不毁循环 */ }
     sweepDuePromises(); // 期票机制:到期承诺→promise-due 事件(一诺一票)
     sweepDueTasks(); // 清算协议:到期任务机械对账——checkCmd 成立=机械销账,不成立=task-due 发作
-    // 焊死实验面:机械评分全判据,30min 一笔,零LLM,失败不毁循环
+    // 实验评分器为可选组件:在装则 30min 一笔机械评分,零LLM,失败不毁循环
     try {
-      const SF = path.join(CA, 'state', 'experiment-last-score.json');
-      let last = 0;
-      try { last = Date.parse(JSON.parse(readFileSync(SF, 'utf8')).ts); } catch { /* 首跑 */ }
-      if (Date.now() - last > 1800e3) {
-        spawnSync('node', [path.join(HERE, 'ca-experiment.mjs'), 'score'], { encoding: 'utf8', timeout: 60_000 });
-        writeFileSync(SF, JSON.stringify({ ts: new Date().toISOString() }) + '\n');
+      const EXP = path.join(HERE, 'ca-experiment.mjs');
+      if (existsSync(EXP)) {
+        const SF = path.join(CA, 'state', 'experiment-last-score.json');
+        let last = 0;
+        try { last = Date.parse(JSON.parse(readFileSync(SF, 'utf8')).ts); } catch { /* 首跑 */ }
+        if (Date.now() - last > 1800e3) {
+          spawnSync('node', [EXP, 'score'], { encoding: 'utf8', timeout: 60_000 });
+          writeFileSync(SF, JSON.stringify({ ts: new Date().toISOString() }) + '\n');
+        }
       }
     } catch { /* 评分器坏不毁循环 */ }
     return { drained, locked: false };

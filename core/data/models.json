@@ -1,0 +1,36 @@
+{
+  "schema": "models/v1(单模型配置:active 指向 models 里任一 enabled 条目;key 一律走 keyEnv 环境变量,仓库零凭据)",
+  "active": "deepseek",
+  "models": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "type": "api",
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.deepseek.com/anthropic",
+      "model": "deepseek-chat",
+      "keyEnv": "DEEPSEEK_API_KEY",
+      "enabled": true
+    },
+    {
+      "id": "glm",
+      "name": "GLM",
+      "type": "api",
+      "api": "anthropic-messages",
+      "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+      "model": "glm-5.3",
+      "keyEnv": "GLM_API_KEY",
+      "enabled": false
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi",
+      "type": "api",
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.moonshot.cn/anthropic",
+      "model": "kimi-k3",
+      "keyEnv": "KIMI_API_KEY",
+      "enabled": false
+    }
+  ]
+}

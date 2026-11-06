@@ -25,6 +25,12 @@ export const PRICING = { // ¥/百万 token
 
 export function walletToday(now = new Date()) {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // 充值(管理面唯一入口):state/wallet-credit.json {date, creditCny}——date=本地今日才生效,翻日自动作废
+  let allowance = ALLOWANCE_CNY;
+  try {
+    const c = JSON.parse(readFileSync(path.join(CA, 'state', 'wallet-credit.json'), 'utf8'));
+    if (c?.date === today && Number(c.creditCny) > 0) allowance += Number(c.creditCny);
+  } catch { /* 无充值=基础额度 */ }
   // 本地日界用 epoch 比较(organ.jsonl 时间戳 Z 与 +08:00 可能混排,startsWith 会漏本地 00:00-08:00 的 Z 行=渗漏)
   let t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const epoch = REGIME_EPOCH ? Date.parse(REGIME_EPOCH) : NaN;
@@ -59,9 +65,9 @@ export function walletToday(now = new Date()) {
   if (seen > 0 && dirty === seen) throw new Error(`wallet-source-corrupt: ${ORGAN} (all ${seen} lines unparsable)`);
   burned = Math.round(burned * 10000) / 10000;
   return {
-    date: today, allowanceCny: ALLOWANCE_CNY, burnedCny: burned,
-    remainingCny: Math.round((ALLOWANCE_CNY - burned) * 10000) / 10000,
-    pct: Math.round((1000 * burned) / ALLOWANCE_CNY) / 10,
+    date: today, allowanceCny: allowance, burnedCny: burned,
+    remainingCny: Math.round((allowance - burned) * 10000) / 10000,
+    pct: Math.round((1000 * burned) / allowance) / 10,
     since: new Date(t0).toISOString(),
     tokens: { in: inTok, out: outTok, cacheRead: cacheTok }, byModel,
     ts: now.toISOString(),
