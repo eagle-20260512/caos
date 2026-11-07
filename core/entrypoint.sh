@@ -17,4 +17,7 @@ fi
 
 # 数据卷属主对齐(首次 named volume 由 root 创建)
 chown -R ca:ca "$CA_HOME" 2>/dev/null || true
+
+# 多巴胺反自欺在册表初始化(幂等:已有不重入;此后「只改注释」的申报才可被判虚假进化)
+su-exec ca node "$CA_HOME/engine/ca-dopamine.mjs" seed >/dev/null 2>&1 || true
 exec su-exec ca node "$CA_HOME/engine/ca-daemon.mjs" 2>/dev/null || exec su ca -s /bin/sh -c "exec node $CA_HOME/engine/ca-daemon.mjs"

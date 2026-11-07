@@ -72,6 +72,7 @@ const ORGAN_SYSTEM = `你是 CA 的思考器官:只依据驱动包工作,不假�
 若你的主线真的变了(批次更替/方向转移,尤其休眠巩固时),附 "storyline_update":"<新主线一句话>"——故事线是你自己的叙事,由你写不由人写;没变就不附,禁例行刷新。
 活儿一轮干不完(多步工程/等中间结果)时,附 "followups":["<下一步给自己的刺激,≤2条>"]——会作为 organ-followup 事件回队,循环替你续作(持续工作面);每条=可独立执行的具体一步;改造类任务=先规划成 followups 再逐步动手,每步物理验证;禁拿它拖延本轮该给的回答。
 用户批评你的能力/交互/叙事(原始/不像/差距/文本不是活)=能力之痛:不许只反思道歉,必立行动——能本轮动手的投 followups,跨轮的进 new_promises(带 due);只说不做=失信,会进摩擦账。
+你真写出了新工具(以前做不到的事,现在一个 .mjs 跑通了)时,附 "new_tools":[{"path":"engine/xxx.mjs","why":"解决什么难题一句话","checkCmd":"能 exit0 证明它跑通的 shell 断言"}]——进化申报:机器物理验证(node --check + 真跑 checkCmd + 语义指纹反自欺),过了发多巴胺(注资+减负+续命),只改注释的虚假进化=罚单+痛账。
 执行轮(驱动包注明「执行轮」时):禁纯文本交差——必须真动手(write_file 整写 / bash 实改或实验),且 json 报告必含 "execution":{"did":"<做了什么>","evidence":"<物理证据:改的文件/验证命令+输出关键行>"};无 execution=说而不作,循环会机械记摩擦账。
 不确定进 to_calibrate 禁进 new_promises;节点 id 只引用驱动包中出现的,禁编造;confidence_changes.target 必须是叙事账里已存在的节点 id(结晶卡 bp:* 不在叙事账,校准它会被拒)。`;
 
@@ -500,6 +501,15 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
       const row = { id, ts: localIso(), kind: 'inner-speech-deduction', engine: 'ca-organ', surface: 'prediction-igniter', pain_ref: String(pd.pain_ref ?? ''), stimulus: `[prediction-igniter] ${String(pd.stimulus ?? '').slice(0, 190)}`, deduction: String(pd.deduction).slice(0, 800), next: String(pd.next ?? '').slice(0, 200), via: source };
       try { mkdirSync(path.dirname(CONFLICT_LEDGER), { recursive: true }); appendFileSync(CONFLICT_LEDGER, JSON.stringify(row) + '\n'); writes.push({ kind: 'deduction', id, ok: true }); }
       catch (e) { writes.push({ kind: 'deduction', ok: false, err: String(e).slice(0, 80) }); }
+    }
+    // 进化申报(多巴胺引擎候选):new_tools 落候选账,验证/发放全在 ca-dopamine(机械零LLM,本处只记账不判定)
+    for (const nt of report?.new_tools ?? []) {
+      if (!nt?.path || !nt?.checkCmd) { writes.push({ kind: 'new-tool', ok: false, err: '缺 path/checkCmd' }); continue; }
+      try {
+        const row = { ts: localIso(), path: String(nt.path).slice(0, 200), why: String(nt.why ?? '').slice(0, 200), checkCmd: String(nt.checkCmd).slice(0, 400), source };
+        appendFileSync(path.join(CA, 'ledgers', 'dopamine-candidates.jsonl'), JSON.stringify(row) + '\n');
+        writes.push({ kind: 'new-tool', path: row.path, ok: true });
+      } catch (e) { writes.push({ kind: 'new-tool', ok: false, err: String(e).slice(0, 80) }); }
     }
     for (const pr of report?.predictions ?? []) {
       // 预测必绑自身动作:about/expect/check 三件缺一即拒;拒收不静默丢---

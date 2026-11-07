@@ -77,6 +77,10 @@ function verdictPrediction(p, state, by) {
   }
   appendFileSync(PRED_LEDGER, JSON.stringify({ id: p.id, state, verdictTs: localIso(), verdictBy: by }) + '\n');
   log({ event: `prediction-${state}`, pred: p.id, about: String(p.about).slice(0, 80), by });
+  // 多巴胺 E1:bind 型预言应验=误差被自己消解,投候选账;验证/发放全在 ca-dopamine(机械零LLM)
+  if (state === 'hit') {
+    try { appendFileSync(path.join(CA, 'ledgers', 'dopamine-candidates.jsonl'), JSON.stringify({ ts: localIso(), kind: 'E1-pred-hit', pred: p.id, about: String(p.about ?? '').slice(0, 160), source: by }) + '\n'); } catch { /* 候选账坏不毁对账 */ }
+  }
   if (state !== 'miss') return;
   // 落空→痛:friction 落账 + pain 事件入队(提优先级点火, 消费)
   try {
@@ -511,6 +515,8 @@ export async function drainOnce() {
     } catch { /* 点火失败不毁循环 */ }
     sweepDuePromises(); // 期票机制:到期承诺→promise-due 事件(一诺一票)
     sweepDueTasks(); // 清算协议:到期任务机械对账——checkCmd 成立=机械销账,不成立=task-due 发作
+    // 多巴胺引擎尾扫:进化候选验证+发放(机械零LLM,轻量;失败不毁循环)
+    try { const DOPA = path.join(HERE, 'ca-dopamine.mjs'); if (existsSync(DOPA)) { const r = spawnSync('node', [DOPA, 'scan'], { encoding: 'utf8', timeout: 60_000 }); const grants = JSON.parse((r.stdout ?? '[]').trim() || '[]'); for (const g of grants) if (g?.awarded) log({ event: 'dopamine-grant', kind: g.kind, amount: g.amountCny, what: g.path ?? g.pred }); } } catch { /* 多巴胺引擎坏不毁循环 */ }
     // 实验评分器为可选组件:在装则 30min 一笔机械评分,零LLM,失败不毁循环
     try {
       const EXP = path.join(HERE, 'ca-experiment.mjs');

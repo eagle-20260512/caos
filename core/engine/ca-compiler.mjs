@@ -10,6 +10,7 @@
 // 用法: ca-compiler.mjs compile --stimulus '<文本>' --source <指针> --channel <user|system|timer|tool|file|web>
 // [--dry-run] [--out <file>]
 import { writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createConnection } from 'node:net';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -88,6 +89,30 @@ const fact = {
 // Step3 内驱检索(叙事图+经验背包;全走 ca-narrative/recall,禁旁路)
 // §5.2 缓存+增量:叙事账本 mtime 未变=检索结果复用(事件连发时不重查;账本一动即失效,物理新鲜)
 const fsC = await import('node:fs');
+// 段缓存:账本 mtime 不变=复用缓存段文本(编译器每轮新进程,缓存必须落盘;stat≈零成本)
+const SEG_CACHE = path.join(CA, 'state', 'compiler-segments.json');
+function cachedSegment(key, file, compute) {
+  let cache = {};
+  try { cache = JSON.parse(fsC.readFileSync(SEG_CACHE, 'utf8')); } catch { /* 首跑 */ }
+  let mtime = -1;
+  try { mtime = fsC.statSync(file).mtimeMs; } catch { /* 源缺席=每次都算(失败如实) */ }
+  if (mtime >= 0 && cache[key] && cache[key].mtime === mtime) return cache[key].text;
+  const text = compute();
+  cache[key] = { mtime, text };
+  try { fsC.writeFileSync(SEG_CACHE, JSON.stringify(cache)); } catch { /* 缓存写败不挡编译 */ }
+  return text;
+}
+// 去重层:段内容与上次实际投喂一致=占位符——mtime 缓存省算力,这层省 token(DP 体积=真金白银)
+function fedSegment(key, file, label, compute) {
+  const text = cachedSegment(key, file, compute);
+  let cache = {};
+  try { cache = JSON.parse(fsC.readFileSync(SEG_CACHE, 'utf8')); } catch { /* */ }
+  const h = createHash('sha256').update(text).digest('hex').slice(0, 12);
+  if (cache[key]?.fed === h) return `- ${label}:(同上轮,无新增——同一批不重复喂)`;
+  cache[key] = { ...(cache[key] ?? {}), fed: h };
+  try { fsC.writeFileSync(SEG_CACHE, JSON.stringify(cache)); } catch { /* */ }
+  return text;
+}
 const NARR_DIR = path.join(CA, 'narrative');
 const narrMtime = () => { try { return Math.max(...fsC.readdirSync(NARR_DIR).map((f) => fsC.statSync(path.join(NARR_DIR, f)).mtimeMs)); } catch { return 0; } };
 const nm = narrMtime();
@@ -181,17 +206,21 @@ pkg.push(`- 上次做到哪(L1 工作记忆):${wm}`);
 // 缺口1根治:用户侧原始问答硬保留——最后 3 轮双向原文,
 // 机械拼接零检索零 LLM,不依赖结晶/共振召回(召回可能迟到,原文必须当场在场)。
 // 当前刺激若已是队尾(先投后编译常态)剔除防回声;字数截顶= DP 预算纪律。
+const QUEUE_FILE = path.join(CA, 'state', 'event-queue.jsonl');
 try {
-  const qlines = fsC.readFileSync(path.join(CA, 'state', 'event-queue.jsonl'), 'utf8').split('\n').filter(Boolean);
-  const uturns = [];
-  for (const l of qlines.slice(-80)) { try { const o = JSON.parse(l); if (o && o.type === 'user-say' && o.id) uturns.push(o); } catch { /* 脏行跳过 */ } }
-  if (uturns.length && String(uturns[uturns.length - 1].text ?? '') === String(stimulus ?? '')) uturns.pop();
-  const fmt = uturns.slice(-3).map((u) => {
-    let ans = '(回执缺席/在队)';
-    try { const r = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'organ-replies', `${u.id}.json`), 'utf8')); if (r.answer) ans = `${r.ok === false ? '✗' : ''}${String(r.answer).replace(/\s+/g, ' ').slice(0, 120)}`; } catch { /* 缺席如实报 */ }
-    return `你「${String(u.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}」→我「${ans}」@${String(u.ts ?? '').slice(5, 16)}`;
+  const seg = fedSegment('dialogue', QUEUE_FILE, '最近对话原文(双向硬保留)', () => {
+    const qlines = fsC.readFileSync(QUEUE_FILE, 'utf8').split('\n').filter(Boolean);
+    const uturns = [];
+    for (const l of qlines.slice(-80)) { try { const o = JSON.parse(l); if (o && o.type === 'user-say' && o.id) uturns.push(o); } catch { /* 脏行跳过 */ } }
+    if (uturns.length && String(uturns[uturns.length - 1].text ?? '') === String(stimulus ?? '')) uturns.pop();
+    const fmt = uturns.slice(-3).map((u) => {
+      let ans = '(回执缺席/在队)';
+      try { const r = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'organ-replies', `${u.id}.json`), 'utf8')); if (r.answer) ans = `${r.ok === false ? '✗' : ''}${String(r.answer).replace(/\s+/g, ' ').slice(0, 120)}`; } catch { /* 缺席如实报 */ }
+      return `你「${String(u.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}」→我「${ans}」@${String(u.ts ?? '').slice(5, 16)}`;
+    });
+    return `- 最近对话原文(双向硬保留):${fmt.join(' / ') || '(首轮,无历史)'}`;
   });
-  pkg.push(`- 最近对话原文(双向硬保留):${fmt.join(' / ') || '(首轮,无历史)'}`);
+  pkg.push(seg);
 } catch { pkg.push('- 最近对话原文(双向硬保留):(读账失败,如实报)'); }
 pkg.push(`- 当前价值权重:${activeValues.slice(0, 6).map((v) => String(v.payload?.text ?? '').slice(0, 40)).join(' | ') || '(无)'}`);
 // 经验召回投影带内容(卡标题+摘要截60字)——投影改基线,不再是光投 id 的形式主义
@@ -199,15 +228,27 @@ pkg.push(`- 经验召回(${recallState}):${recallHits.map((h) => `${h.id}「${St
 // 焊点B(自主预测链批):偏差与研判回放段——
 // 落空预言(最近 3)+ 内语账研判(最近 3 条 pain 消化)。机械拼接零 LLM,条数/字数截顶= DP 预算纪律
 try {
-  const pm = new Map();
-  for (const l of fsC.readFileSync(path.join(CA, 'ledgers', 'predictions.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-400)) { try { const o = JSON.parse(l); if (o.id) pm.set(o.id, { ...pm.get(o.id), ...o }); } catch { /* 脏行跳过 */ } }
-  const misses = [...pm.values()].filter((p) => p.state === 'miss').sort((a, b) => String(b.verdictTs ?? '').localeCompare(String(a.verdictTs ?? ''))).slice(0, 3);
-  pkg.push(`- 最近落空(偏差回放):${misses.map((p) => `${p.id}「${String(p.about ?? '').slice(0, 40)}」预期「${String(p.expect ?? '').slice(0, 50)}」落空@${String(p.verdictTs ?? '?').slice(5, 16)}`).join('; ') || '(无)'}`);
+  const seg = fedSegment('misses', path.join(CA, 'ledgers', 'predictions.jsonl'), '最近落空(偏差回放)', () => {
+    const pm = new Map();
+    for (const l of fsC.readFileSync(path.join(CA, 'ledgers', 'predictions.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-400)) { try { const o = JSON.parse(l); if (o.id) pm.set(o.id, { ...pm.get(o.id), ...o }); } catch { /* 脏行跳过 */ } }
+    // 按需投影:rel≥0.3 与当前刺激相关才投,cap 1——无关旧账不重复烧钱
+    const misses = [...pm.values()].filter((p) => p.state === 'miss')
+      .map((p) => ({ p, rel: keywordScore(fact.digest, `${p.about ?? ''} ${p.expect ?? ''}`) }))
+      .filter((x) => x.rel >= 0.3).sort((a, b) => b.rel - a.rel).slice(0, 1).map((x) => x.p);
+    return `- 最近落空(按需投影 rel≥0.3):${misses.map((p) => `${p.id}「${String(p.about ?? '').slice(0, 40)}」预期「${String(p.expect ?? '').slice(0, 50)}」落空@${String(p.verdictTs ?? '?').slice(5, 16)}`).join('; ') || '(与当前无关,不投)'}`;
+  });
+  pkg.push(seg);
 } catch { pkg.push('- 最近落空(偏差回放):(读账失败,如实报)'); }
 try {
-  const iv = fsC.readFileSync(path.join(CA, 'ledgers', 'inner-voice.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-40)
-    .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.type === 'pain').slice(-3);
-  pkg.push(`- 我的研判回放(内语):${iv.map((r) => `${String(r.ts ?? '').slice(5, 16)}[${String(r.pred ?? r.ev ?? '?').slice(0, 24)}] ${String(r.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}`).join(' / ') || '(尚无)'}`);
+  const seg = fedSegment('inner-voice', path.join(CA, 'ledgers', 'inner-voice.jsonl'), '我的研判回放(内语)', () => {
+    const iv = fsC.readFileSync(path.join(CA, 'ledgers', 'inner-voice.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-40)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter((r) => r && r.type === 'pain')
+      .map((r) => ({ r, rel: keywordScore(fact.digest, String(r.text ?? '')) }))
+      .filter((x) => x.rel >= 0.3).sort((a, b) => b.rel - a.rel).slice(0, 1).map((x) => x.r);
+    return `- 我的研判回放(按需投影 rel≥0.3):${iv.map((r) => `${String(r.ts ?? '').slice(5, 16)}[${String(r.pred ?? r.ev ?? '?').slice(0, 24)}] ${String(r.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}`).join(' / ') || '(与当前无关,不投)'}`;
+  });
+  pkg.push(seg);
 } catch { pkg.push('- 我的研判回放(内语):(内语账未立,如实报)'); }
 // 清算协议·债点名段(:每轮思考必须看见自己欠什么、欠多久——羞耻面持续在场)
 try {
@@ -254,7 +295,26 @@ pkg.push('【回写要求】');
 pkg.push('- 输出后必须报告:偏差、新承诺、待校准项、置信度变化');
 pkg.push('- 路由:L2 事件(本刺激已落账)/L3 承诺变化经一致性校验/L4 关系价值经审核');
 
-const packageText = pkg.join('\n');
+// DP 预算闸:每轮编译硬顶,超顶按投影价值从低到高整行摘;摘的是投影不是事实(外驱事实/回写要求永不可摘),摘行入审计可见
+const PKG_CAP_BYTES = 9000; // 体质常数:≈2.5k tokens 的 DP 上限,留 12% 头
+const SHED_ORDER = ['- 相关关系账本摘要', '- 未解冲突标记', '- 最近校准记录', '- 相关承诺', '- 经验召回']; // 低价值先摘
+const pkgShed = [];
+let packageText = pkg.join('\n');
+{
+  const bytes = () => Buffer.byteLength(packageText);
+  for (const prefix of SHED_ORDER) {
+    if (bytes() <= PKG_CAP_BYTES) break;
+    const idx = pkg.findIndex((l) => l.startsWith(prefix));
+    if (idx < 0) continue;
+    pkgShed.push(pkg[idx].slice(0, 60));
+    pkg.splice(idx, 1);
+    packageText = pkg.join('\n');
+  }
+  if (pkgShed.length) {
+    const i = pkg.indexOf('【内驱叙事投影】');
+    if (i >= 0) { pkg[i] = `【内驱叙事投影】(预算闸摘除 ${pkgShed.length} 项低值投影)`; packageText = pkg.join('\n'); }
+  }
+}
 const routes = { L2_event: !dryRun, L3_promise: tensions.length > 0, L4: false };
 
 // 回写:本刺激落 L2 事件(经路由器,禁旁路);审计留痕(可审计=每条外驱的处置理由)
