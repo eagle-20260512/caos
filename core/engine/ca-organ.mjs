@@ -48,7 +48,11 @@ function loadModel() {
   return list.find((m) => m.id === want) || list.find((m) => m.id === conf.active) || list[0] || null;
 }
 function keyOf(m) {
-  return (m.keyEnv && process.env[m.keyEnv]) || '';
+  if (m.keyEnv && process.env[m.keyEnv]) return process.env[m.keyEnv];
+  try { // 运行期钥匙(web 配置面写 config/runtime-keys.json;卷内数据非仓库,零凭据红线不破)
+    const j = JSON.parse(readFileSync(path.join(CA, 'config', 'runtime-keys.json'), 'utf8'));
+    return j[m.keyProvider || m.id] || '';
+  } catch { return ''; }
 }
 
 // ── 器官契约(系统提示:驱动包是唯一上下文,拒答必须带缺口地图) ──

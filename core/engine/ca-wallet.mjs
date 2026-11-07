@@ -13,7 +13,12 @@ const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
 const ORGAN = process.env.CA_WALLET_ORGAN || path.join(CA, 'ledgers', 'organ.jsonl');
 const WALLET = path.join(CA, 'state', 'wallet.json');
 
-export const ALLOWANCE_CNY = Number(process.env.CA_WALLET_ALLOWANCE ?? 5.0); // 日额度
+export const ALLOWANCE_CNY = Number(process.env.CA_WALLET_ALLOWANCE ?? 5.0); // 日额度(env=部署默认)
+// 运行期调整(web 配置面写 state/wallet-config.json {allowanceCny};每轮重读,改即生效,翻日不废)
+export function allowanceToday() {
+  try { const c = JSON.parse(readFileSync(path.join(CA, 'state', 'wallet-config.json'), 'utf8')); if (Number(c?.allowanceCny) > 0) return Number(c.allowanceCny); } catch { /* 无配置=env 默认 */ }
+  return ALLOWANCE_CNY;
+}
 // regime 纪元:部署者可设免责起点(该时刻前的当日烧量既往不咎——如迁移旧账时豁免历史)。
 // 默认 null=无免责,按本地自然日全天计。
 export const REGIME_EPOCH = process.env.CA_WALLET_EPOCH ?? null;

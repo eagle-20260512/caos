@@ -5,6 +5,7 @@ import { registerChat } from './routes/chat.js';
 import { registerStatus } from './routes/status.js';
 import { registerLogs } from './routes/logs.js';
 import { registerAdmin } from './routes/admin.js';
+import { registerConfig } from './routes/config.js';
 
 const CA = process.env.CA_HOME ?? '/ca';
 const PORT = Number(process.env.PORT ?? 8321);
@@ -28,6 +29,7 @@ await registerChat(app, { CA });
 await registerStatus(app, { CA });
 await registerLogs(app, { CA });
 await registerAdmin(app, { CA, adminOk });
+await registerConfig(app, { CA, adminOk });
 
 app.get('/api/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 

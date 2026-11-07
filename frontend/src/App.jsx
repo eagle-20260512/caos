@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import Vitals from './panels/Vitals.jsx';
 import Chat from './panels/Chat.jsx';
 import Metabolism from './panels/Metabolism.jsx';
+import Config from './panels/Config.jsx';
 
 export default function App() {
   const [snap, setSnap] = useState(null);
+  const [showCfg, setShowCfg] = useState(false);
 
   useEffect(() => {
     const es = new EventSource('/api/status/stream');
@@ -14,10 +16,10 @@ export default function App() {
 
   return (
     <div className="app">
-      <Vitals snap={snap} />
+      <Vitals snap={snap} onOpenConfig={() => setShowCfg((v) => !v)} />
       <main>
         <section className="col chat"><Chat /></section>
-        <section className="col meta"><Metabolism snap={snap} /></section>
+        <section className="col meta">{showCfg ? <Config onClose={() => setShowCfg(false)} /> : <Metabolism snap={snap} />}</section>
       </main>
     </div>
   );

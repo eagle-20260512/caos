@@ -1,7 +1,7 @@
 import React from 'react';
 
 // 生命体征头:活性(濒死红闪)/钱包/疲劳/经济痛——CA 的「还活着吗」一眼面
-export default function Vitals({ snap }) {
+export default function Vitals({ snap, onOpenConfig }) {
   const v = snap?.vitality?.vitality;
   const state = snap?.vitality?.state ?? '…';
   const dying = typeof v === 'number' && v < 0.5;
@@ -36,6 +36,7 @@ export default function Vitals({ snap }) {
         <b>{snap?.queue?.pending ?? '—'}</b>
         <span className="mini">在排事件</span>
       </div>
+      <button className="gear" title="配置" onClick={onOpenConfig}>⚙</button>
     </header>
   );
 }
