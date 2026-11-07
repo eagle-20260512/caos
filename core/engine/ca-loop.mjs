@@ -115,6 +115,11 @@ function hitIsSelfStat(text, pattern) {
 function noOutputReason(out, wallMs) {
   if (!out) return { code: 'organ-crash', human: '器官进程崩溃/超时或输出不可解析' }; // stdout 非 JSON:die/hardRace/被杀 都走这
   if (out.error) return { code: 'organ-error', human: `器官报错:${String(out.error).slice(0, 80)}` };
+  // 焊点C(CA 自诊补丁 2026-11-07,CC 代合并):跑到一半被墙钟掐断 vs 跑满自然停——同是「跑了 N 轮无答案」,
+  //   死因不同(超时要加 wallMs 预算,自然停要查 prompt)。字段修正:器官自计时是 ms(原补丁写的 elapsedMs 不存在,已按实改)
+  if (wallMs && out.rounds > 0 && Number(out.ms) >= wallMs * 0.95) {
+    return { code: 'organ-walltime', human: `器官跑到墙钟上限(${Math.round(Number(out.ms))}ms/${wallMs}ms)被掐断,${out.rounds} 轮无答案` };
+  }
   if (!out.rounds) return { code: 'organ-no-round', human: '器官未起步即退场' };
   return { code: 'organ-empty', human: `器官跑了 ${out.rounds} 轮但无答案产出` };
 }
@@ -259,6 +264,7 @@ function stimulusOf(ev) {
     case 'patrol-tension': return { text: String(ev.text ?? ''), channel: 'timer' }; // 巡逻张力(:巡逻=事件源,思考全量编译走器官)
     case 'organ-followup': return { text: `执行轮(你自己投的续作):${String(ev.text ?? '')}——禁纯文本交差,必须真动手(write_file/bash 实改或实验),json 报告 execution.evidence 必填;大文件用 bash+python 精准替换,write_file 限整写小文件`, channel: 'system' };
     case 'self-hunger': return { text: `执行轮(你的饥饿感自点火,无人喂养):${String(ev.text ?? '')}——选题你已自定,现在真动手+execution.evidence;做完如实答「这件事对『我』的价值是什么」`, channel: 'system' };
+    case 'proactive-chat': return { text: String(ev.text ?? ''), channel: 'system' }; // 主动搭话(想说话.txt):点火文案在代谢侧已写好,正文即发言,消化后进 ca-say 喉咙面
     case 'self-work': return { text: `执行轮·我要做什么(你的 [自驱] 承诺在烧):${String(ev.text ?? '')}——纪律同上:真动手+execution.evidence;若承诺已不适用,履约/展期/违约三选一,禁拖`, channel: 'system' };
     case 'dream': return { text: '休眠巩固(叙事→义务+活叙事):整理今日事件/冲突/承诺,压缩旧账。必产:①若主线迁移→storyline_update;②把当前故事线转成 ≤2 条 [自驱] 新承诺(带 due,近两日可执行,禁空话);③≥2 条可机械验证的 predictions,其中 ≥1 条必须是「叙事一致性自我预言」——按你的故事线/价值观,未来 24-48h 你的账本应该呈现什么(用 check.cmd 对自家账本断言:行数/存在性/时间戳),禁对外部世界;你的叙事对自己下预言,背叛叙事就会疼——这才是活叙事,不是朗读文本', channel: 'timer' };
     default: return { text: String(ev.text ?? '') + (ev.closure?.mustAction ? `——落空即行动:你必须执行你在预言里 bind 的动作:${ev.closure.mustAction}(执行轮纪律:真动手+execution.evidence)` : ''), channel: 'system' };
@@ -295,7 +301,7 @@ function readCursor() {
   } catch { return new Set(); }
 }
 const atomicWrite = (p, data) => { const t = p + '.tmp-' + process.pid; writeFileSync(t, data); renameSync(t, p); };
-function writeCursor(done, doing = null) { writeFileSync(CURSOR, JSON.stringify({ v: 2, done: [...done].sort((a, b) => a - b), doing, ts: new Date().toISOString() }) + '\n'); }
+function writeCursor(done, doing = null) { writeFileSync(CURSOR, JSON.stringify({ v: 2, done: [...done].sort((a, b) => a - b), doing, pid: process.pid, ts: new Date().toISOString() }) + '\n'); } // pid=写者指纹(2026-11-07 验尸:游标 done 倒退案,落笔者实名制)
 
 function readEvents() {
   if (!existsSync(QUEUE)) return [];
@@ -435,7 +441,7 @@ export async function drainOnce() {
       let organTask = null;
       try { organTask = ev.task ?? taskOfPred(ev.pred); } catch { /* 反查坏不挡消化 */ }
       // 软着陆档:执行件递 output 预算锚 16k(≈2 个满轮干活量;why:锚定「干活量由产出衡量」,阀外可经 CA_LOOP_OUTBUDGET 调;递减早停防磨洋工)
-      const r = await runOrgan([ORGAN, 'run', '--dp', dp, '--source', `ledger:state/event-queue.jsonl#L${next + 1}`, '--channel', stim.channel, '--json', ...(isExec ? ['--max-rounds', String(Number(process.env.CA_LOOP_EXEC_ROUNDS ?? 12))] : [])], { CA_ORGAN_TRACE: traceFile, CA_ORGAN_BUDGET_MS: String(capMs - 60_000), ...(organTask ? { CA_ORGAN_TASK: organTask } : {}), ...(isExec ? { CA_ORGAN_MAXTOK: '8000', CA_ORGAN_OUTBUDGET: String(Number(process.env.CA_LOOP_OUTBUDGET ?? 16000)) } : {}) }, capMs, preemptCheck);
+      const r = await runOrgan([ORGAN, 'run', '--dp', dp, '--source', `ledger:state/event-queue.jsonl#L${next + 1}`, '--channel', stim.channel, '--json', ...(isExec ? ['--max-rounds', String(Number(process.env.CA_LOOP_EXEC_ROUNDS ?? 12))] : [])], { CA_ORGAN_TRACE: traceFile, CA_ORGAN_BUDGET_MS: String(capMs - 60_000), ...(organTask ? { CA_ORGAN_TASK: organTask } : {}), ...(isExec ? { CA_ORGAN_MAXTOK: '8000', CA_ORGAN_OUTBUDGET: String(Number(process.env.CA_LOOP_OUTBUDGET ?? 16000)) } : {}), ...(ev.type === 'user-say' ? { CA_ORGAN_STREAM: path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`) } : {}) }, capMs, preemptCheck);
       const wallMs = Date.now() - tW0; // 含编译+思考的全程墙钟:退场悬挂回归闸(exp-organ-linger)的仪表
       if (r.preempted) { log({ event: 'preempted', id: eid, type: ev.type }); writeWM(eid, ev.type, 'preempted', ev.text); continue; } // 让位:重扫即上用户件
       let out = null;
@@ -455,10 +461,16 @@ export async function drainOnce() {
       } else if (ev.type === 'user-say' && !out?.answer) {
         // 器官无产出(崩溃/超时/解析失败)也必须有回执(:organ ReferenceError 崩在账后,
         // 无回执=CLI 白等 480s)——诚实失败回执,禁装死;friction 落账会疼
+        // 2026-11-07 根修:死因不再盲猜——stderr 尾部进回执+摩擦账(缺 key/编译失败当场可见;
+        //   实弹:114ms 三连崩全靠猜,真因=key 未注入,一句话死因本可当场说清)
         mkdirSync(REPLIES, { recursive: true });
-        atomicWrite(path.join(REPLIES, `${eid}.json`), JSON.stringify({ id: eid, ts: new Date().toISOString(), answer: `〔如实·${noOutputReason(out, wallMs).code}〕${noOutputReason(out, wallMs).human}(wallMs ${wallMs})。话已在账,修复后重发即可——不用连发。`, usage: null, ms: wallMs, ok: false, organFailed: true }) + '\n');
-        try { appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'organ-no-answer', surface: 'user-reply', detail: `用户件 ${eid} 消化但器官无 answer(wallMs ${wallMs})`, evidence: `ledger:ledgers/loop.jsonl#${eid}`, verified: true }) + '\n'); } catch { /* */ }
+        const nr = noOutputReason(out, wallMs);
+        const cause = String(r.stderr ?? '').replace(/\s+/g, ' ').trim().slice(-160);
+        atomicWrite(path.join(REPLIES, `${eid}.json`), JSON.stringify({ id: eid, ts: new Date().toISOString(), answer: `〔如实·${nr.code}〕${nr.human}(wallMs ${wallMs})${cause ? `;死因:${cause}` : ''}。话已在账,修复后重发即可——不用连发。`, usage: null, ms: wallMs, ok: false, organFailed: true }) + '\n');
+        try { appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'organ-no-answer', surface: 'user-reply', detail: `用户件 ${eid} 消化但器官无 answer(wallMs ${wallMs})${cause ? `;死因:${cause}` : ''}`, evidence: `ledger:ledgers/loop.jsonl#${eid}`, verified: true }) + '\n'); } catch { /* */ }
       }
+      // 流式溢出文件用后清理(瞬时面不留渣;回执已落=前端最终帧以回执为准,删流文件无信息损)
+      if (ev.type === 'user-say') { try { spawnSync('rm', ['-f', path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`)]); } catch { /* 清渣坏不毁循环 */ } }
       // 焊点A:非用户件的器官研判(answer+report 摘要)落内语账——
       // 此前 pain/执行轮的研判消化完即弃=内语蒸发(实锤:miss-born 任务 7 条零推进,研判没人看见)
       if (ev.type !== 'user-say' && out?.answer) {
@@ -469,8 +481,16 @@ export async function drainOnce() {
           appendFileSync(INNER_VOICE, JSON.stringify({ ts: new Date().toISOString(), ev: eid, type: ev.type, pred: ev.pred ?? null, ok, text: String(out.answer).slice(0, 1000), reportKeys: rep }) + '\n');
         } catch { /* 内语落账失败不毁循环 */ }
       }
-      reconcileEvent(ev, eid, `ledger:state/event-queue.jsonl#L${next + 1}`);
-      // 说而不作机械账:执行轮(续作/自驱工作)无 execution 证据=痛
+      // 主动搭话喉咙(2026-11-07 用户令·想说话.txt):proactive-chat 的发言落 state/ca-say.jsonl,
+      //   后端 SSE 尾随直推前端会话框——不等用户喂话也能开口;优先取报告「要说的那句话」字段(CA 自定契约)
+      if (ev.type === 'proactive-chat' && ok && out?.answer) {
+        try {
+          const say = String(out.report?.['要说的那句话'] ?? '').trim()
+            || String(out.answer).replace(/```json[\s\S]*$/, '').trim();
+          if (say) appendFileSync(path.join(CA, 'state', 'ca-say.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ev: eid, reason: ev.reason ?? 'hunger', text: say.slice(0, 800) }) + '\n');
+        } catch { /* 喉咙面坏不毁循环 */ }
+      }
+      try { reconcileEvent(ev, eid, `ledger:state/event-queue.jsonl#L${next + 1}`); } catch (e) { log({ event: 'reconcile-threw', id: eid, err: String((e && e.stack) || e).slice(0, 300) }); } // 2026-11-07 验尸:裸调用逸出=办结行不写=同件每 pass 重炸(生产 11-06 四连炸同型)
       // 说而不作机械账:执行轮(续作/自驱工作)无 execution 证据=痛
       // 清算协议·空转惩罚:pain 消化同样要牙——落空研判若无具体工具调用=重度自欺,落 friction 公示
       if ((ev.type === 'organ-followup' || ev.type === 'self-work' || ev.type === 'self-hunger' || ev.type === 'pain') && ok) {

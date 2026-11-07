@@ -9,9 +9,14 @@ export default function Config({ onClose }) {
 
   const headers = () => ({ 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) });
   const load = async () => {
-    const r = await fetch('/api/config', { headers: headers() });
-    if (r.status === 403) { setCfg(null); setMsg('需要 ADMIN_TOKEN'); return; }
-    const j = await r.json();
+    // 2026-11-07 根修「点击确认没有反应」:fetch 抛错/非 JSON 此前全静默——三类失败分别如实上屏
+    let r;
+    try { r = await fetch('/api/config', { headers: headers() }); }
+    catch (e) { setCfg(null); setMsg(`连不上后端 /api/config:${e.message}——查 backend 容器在不在跑、nginx /api 反代通不通`); return; }
+    if (r.status === 403) { setCfg(null); setMsg('令牌不对(403):这里要的是部署 .env 里的 ADMIN_TOKEN,不是 LLM 的 API key'); return; }
+    let j;
+    try { j = await r.json(); } catch { setCfg(null); setMsg(`后端回了非 JSON(HTTP ${r.status})——反代多半打错了上游`); return; }
+    setMsg('');
     setCfg(j);
     const active = (j.models?.models ?? []).find((m) => m.id === j.models?.active) ?? j.models?.models?.[0];
     if (active) setForm({ id: active.id, baseUrl: active.baseUrl, model: active.model, keyEnv: active.keyEnv, key: '', allowanceCny: j.wallet?.allowanceCny ?? j.allowanceEnv });
@@ -28,8 +33,8 @@ export default function Config({ onClose }) {
   if (!cfg) return (
     <div className="config-panel">
       <h2>配置 <button className="x" onClick={onClose}>×</button></h2>
-      <p className="hint">{msg || '输入管理令牌(部署时 .env 的 ADMIN_TOKEN;留空部署=免令)'}</p>
-      <input type="password" placeholder="ADMIN_TOKEN" value={token}
+      <p className="hint">{msg || '先过管理闸:这里填部署 .env 的 ADMIN_TOKEN(管理令牌,不是 LLM 的 API key;.env 留空=免令,直接点进入)。进去后才看得到:模型/baseUrl、API key 写入、钱包日额度(预算)。'}</p>
+      <input type="password" placeholder="管理令牌 ADMIN_TOKEN(≠ API key)" value={token}
         onChange={(e) => setToken(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') { localStorage.setItem('caos-admin-token', token); load(); } }} />
       <button onClick={() => { localStorage.setItem('caos-admin-token', token); load(); }}>进入</button>

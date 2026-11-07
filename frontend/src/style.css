@@ -1,7 +1,7 @@
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #0d1117; color: #e6edf3; font: 14px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-.app { min-height: 100vh; display: flex; flex-direction: column; }
+.app { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
 
 .vitals { display: flex; align-items: stretch; gap: 12px; padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex-wrap: wrap; }
 .vitals .brand { font-size: 20px; font-weight: 700; align-self: center; margin-right: 12px; }
@@ -15,27 +15,63 @@ body { margin: 0; background: #0d1117; color: #e6edf3; font: 14px/1.5 -apple-sys
 .vitals .cell.alarm b { color: #f85149; }
 @keyframes pulse { 0%,100% { background: #161b22; } 50% { background: #3d1416; } }
 
-main { flex: 1; display: grid; grid-template-columns: 1fr 380px; gap: 12px; padding: 12px 16px; }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 380px; gap: 12px; padding: 12px 16px; }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-.col { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; min-height: 70vh; }
+.col { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.col.meta > * { overflow: visible; }
+.meta-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.meta-panel .weights { overflow-y: auto; min-height: 0; flex: 0 1 auto; max-height: 45%; }
+.meta-panel .voice { overflow-y: auto; min-height: 0; flex: 1; }
 h2 { margin: 0 0 10px; font-size: 16px; }
 h3 { font-size: 13px; color: #8b949e; margin: 14px 0 6px; }
 .hint { font-size: 11px; color: #6e7681; font-weight: 400; margin-left: 8px; }
 .empty { color: #6e7681; padding: 20px; text-align: center; }
 
-.msgs { height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px; }
+/* 对话面(2026-11-07 大修):固定一屏,msgs 内部滚动;DeepSeek 式气泡+markdown 排版 */
+.chat-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.msgs { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 6px 4px; scroll-behavior: smooth; }
+.msgs .more { align-self: center; background: #21262d; border: 1px solid #30363d; color: #8b949e; border-radius: 12px; padding: 3px 14px; font-size: 12px; cursor: pointer; }
+.msgs .more:hover { color: #58a6ff; border-color: #58a6ff; }
 .msg { display: flex; gap: 8px; }
-.msg .who { flex: 0 0 28px; color: #8b949e; font-size: 12px; padding-top: 2px; }
-.msg p { margin: 0; white-space: pre-wrap; background: #0d1117; border-radius: 8px; padding: 8px 12px; flex: 1; }
-.msg.user p { background: #1f2c3d; }
-.msg.ca p { background: #14201a; }
-.msg.sys p { background: #2d2230; font-size: 12px; }
-.composer { display: flex; gap: 8px; margin-top: 10px; }
-.composer input { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e6edf3; padding: 10px; }
+.msg .who { flex: 0 0 28px; color: #8b949e; font-size: 12px; padding-top: 8px; text-align: center; }
+.msg .bubble { margin: 0; background: #0d1117; border: 1px solid #21262d; border-radius: 12px; padding: 9px 14px; flex: 1; min-width: 0; }
+.msg.user .who { color: #79b8ff; }
+.msg.user .bubble { background: #16325c; border-color: #1f4f8f; color: #e6edf3; white-space: pre-wrap; }
+.msg.ca .who { color: #7ee787; }
+.msg.ca .bubble { background: #14201a; border-color: #1d3a2a; }
+.msg.ca .bubble.failed { border-color: #6e2b2b; background: #231517; }
+.msg.ca .bubble.proactive { border-color: #2ea043; box-shadow: 0 0 8px #2ea04333; }
+.ptag { display: inline-block; font-size: 10px; color: #7ee787; border: 1px solid #2ea043; border-radius: 8px; padding: 0 6px; margin-bottom: 4px; }
+.msg.sys .bubble { background: #2d2230; border-color: #43304a; font-size: 12px; white-space: pre-wrap; }
+/* 流式光标(DeepSeek 式逐字生长感) */
+.bubble.streaming::after { content: '▍'; color: #7ee787; animation: caret 0.9s steps(1) infinite; }
+@keyframes caret { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+/* markdown 富排版 */
+.md { line-height: 1.65; font-size: 14px; }
+.md > *:first-child { margin-top: 0; }
+.md > *:last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4 { margin: 12px 0 6px; color: #e6edf3; line-height: 1.3; }
+.md h1 { font-size: 19px; } .md h2 { font-size: 17px; } .md h3 { font-size: 15px; } .md h4 { font-size: 14px; }
+.md p { margin: 6px 0; }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li { margin: 2px 0; }
+.md a { color: #58a6ff; }
+.md code { background: #0d1117; border: 1px solid #30363d; border-radius: 4px; padding: 1px 5px; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #ffa657; }
+.md pre { background: #0a0d12; border: 1px solid #30363d; border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+.md pre code { background: none; border: 0; padding: 0; color: #c9d1d9; font-size: 12.5px; }
+.md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid #30363d; color: #8b949e; }
+.md table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+.md th, .md td { border: 1px solid #30363d; padding: 4px 10px; }
+.md th { background: #0d1117; }
+.md hr { border: 0; border-top: 1px solid #30363d; margin: 10px 0; }
+.composer { display: flex; gap: 8px; margin-top: 10px; flex: 0 0 auto; }
+.composer textarea { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e6edf3; padding: 10px; font: inherit; resize: none; }
+.composer textarea:focus { border-color: #58a6ff; outline: none; }
 .composer button { background: #238636; color: #fff; border: 0; border-radius: 8px; padding: 0 20px; cursor: pointer; }
-.dp { margin-top: 12px; font-size: 12px; }
+.composer button:disabled { background: #21262d; color: #6e7681; cursor: default; }
+.dp { margin-top: 10px; font-size: 12px; flex: 0 0 auto; }
 .dp summary { cursor: pointer; color: #8b949e; }
-.dp pre { background: #0d1117; border-radius: 8px; padding: 10px; overflow-x: auto; max-height: 200px; overflow-y: auto; }
+.dp pre { background: #0d1117; border-radius: 8px; padding: 10px; overflow: auto; max-height: 160px; }
 
 .winner { margin-bottom: 10px; color: #8b949e; }
 .winner b { color: #58a6ff; font-size: 16px; }

@@ -170,7 +170,13 @@ async function execTool(name, input) {
 
 // ── 单轮 LLM 调用(过阀;usage 如实返回;channel=user=P1,预算封顶档仍放行) ──
 // toolsOn=false=物理零工具(请求不发 tools 字段,模型无枪可指;--no-tools 真零形态)
-async function callLlm(m, key, messages, maxTok, channel, toolsOn) {
+// Web 流式面(2026-11-07 用户令「100% 复刻 DeepSeek 流式」,双树同步):loop 经 CA_ORGAN_STREAM 传文件指针时,
+//   每轮正文 text_delta 实时落盘({round,reset}/{delta}/{done}),backend SSE 尾随推给前端逐字渲染;
+//   不设 env=零行为变化。repair 补票轮不流(它只产 json 报告,流了会洗掉用户眼前的正文)。
+const STREAM_FILE = process.env.CA_ORGAN_STREAM ?? null;
+const streamSpill = (obj) => { if (!STREAM_FILE) return; try { mkdirSync(path.dirname(STREAM_FILE), { recursive: true }); appendFileSync(STREAM_FILE, JSON.stringify(obj) + '\n'); } catch { /* 流式面坏不毁思考 */ } };
+
+async function callLlm(m, key, messages, maxTok, channel, toolsOn, onText = null) {
   const gate = throttleGate({ surface: 'organ:think', purpose: channel === 'user' ? 'P1 user-order' : `autonomous:${channel}` });
   if (!gate.allowed) { // 阀关也要有账:每次被闸都有物理行(补:静默 skip=跳过无账)
     const rec = { ts: new Date().toISOString(), id: process.env.CA_EVENT_ID ?? null, surface: 'organ:think', channel, reason: String(gate.notice).slice(0, 200), src: process.env.CA_SOURCE ?? null };
@@ -194,12 +200,13 @@ async function callLlm(m, key, messages, maxTok, channel, toolsOn) {
   // 网关未按 SSE 回(老代理/回退)时向后兼容:非 event-stream 直接 json
   const ct = String(r.headers.get('content-type') ?? '');
   if (!ct.includes('text/event-stream') || !r.body) return { j: await r.json() };
-  const j = await readAnthropicSse(r.body);
+  const j = await readAnthropicSse(r.body, onText);
   return { j };
 }
 
 // SSE delta → Anthropic messages 响应体(text_delta / input_json_delta / thinking_delta 分类累积;message_delta.usage 补尾)
-async function readAnthropicSse(stream) {
+// onText:web 流式面旁路钩子——每个 text_delta 原样递出(不影响累积主路)
+async function readAnthropicSse(stream, onText = null) {
   const dec = new TextDecoder();
   const blocks = []; // index → block
   const j = { content: blocks, usage: {}, stop_reason: null };
@@ -223,7 +230,7 @@ async function readAnthropicSse(stream) {
     if (t === 'content_block_delta') {
       const b = blocks[e.index] ??= { type: 'text', text: '' };
       const d = e.delta ?? {};
-      if (d.type === 'text_delta') b.text = (b.text ?? '') + (d.text ?? '');
+      if (d.type === 'text_delta') { b.text = (b.text ?? '') + (d.text ?? ''); try { onText?.(d.text ?? ''); } catch { /* 流式旁路坏不毁主流 */ } }
       else if (d.type === 'input_json_delta') b._json = (b._json ?? '') + (d.partial_json ?? '');
       else if (d.type === 'thinking_delta') b.thinking = (b.thinking ?? '') + (d.thinking ?? '');
       else if (d.type === 'signature_delta') b.signature = (b.signature ?? '') + (d.signature ?? '');
@@ -342,7 +349,8 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
     trace({ round, phase: 'llm-start' });
     let llm;
     const tLlm = Date.now();
-    try { llm = await hardRace(callLlm(m, key, messages, Number(process.env.CA_ORGAN_MAXTOK ?? 4000), channel, maxRounds > 0), LLM_CAP_MS, `round${round}`); }
+    streamSpill({ round, reset: true }); // web 流式:新一轮正文重头累积(工具轮碎语不留在用户眼前)
+    try { llm = await hardRace(callLlm(m, key, messages, Number(process.env.CA_ORGAN_MAXTOK ?? 4000), channel, maxRounds > 0, (t) => streamSpill({ delta: t })), LLM_CAP_MS, `round${round}`); }
     catch (e) {
       trace({ round, phase: 'llm-error', ms: Date.now() - tLlm, err: String(e).slice(0, 120) });
       if (rounds === 0) throw e; // 零轮即死=如实崩,loop 记 fail 翻篇(快失败,不空转)
@@ -376,7 +384,8 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
       // 强制收官轮(:轮帽打断=reportParsed false 连发;脱工具再叫一轮,必须交正文+json 报告)
       messages.push({ role: 'assistant', content: blocks });
       messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: calls[0].id, content: '〔系统〕工具轮帽用尽,禁再调工具' }, ...calls.slice(1).map((c) => ({ type: 'tool_result', tool_use_id: c.id, content: '〔系统〕同上' })), { type: 'text', text: '轮帽用尽。立即用现有证据收口:正文+末尾 ```json 报告(predictions 至少1条,执行轮必含 execution)。现在就给,禁再调查。' }] });
-      const fin = await hardRace(callLlm(m, key, messages, 4000, channel, false), LLM_CAP_MS, 'final').catch(() => null); // 收官轮硬超时=保已有正文,不再烧
+      streamSpill({ round: 'final', reset: true }); // 收官轮=用户眼前的终答,流式重锚
+      const fin = await hardRace(callLlm(m, key, messages, 4000, channel, false, (t) => streamSpill({ delta: t })), LLM_CAP_MS, 'final').catch(() => null); // 收官轮硬超时=保已有正文,不再烧
       if (!fin || fin.throttled) { throttled = fin?.throttled ?? throttled; break; }
       const fb = fin.j.content ?? [];
       const ft = fb.filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('');
@@ -431,6 +440,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
       if (rt) { reportText = `${finalText}\n${rt}`; repaired = extractReport(rt) ? 'saved' : 'failed'; }
     } catch { trace({ phase: 'repair-end', ok: false, err: 'hard-timeout' }); repaired = 'failed'; }
   }
+  streamSpill({ done: true }); // web 流式:终帧(回执仍以 organ-replies 为准,流只是呈现加速器)
   return { text: finalText, reportText, rounds, usage: usageTot, throttled, degraded, repaired, model: m.model, ms: Date.now() - t0 };
 }
 

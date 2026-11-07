@@ -29,6 +29,10 @@ services:
       NO_PROXY: ca-sandbox,ca-mock,localhost,127.0.0.1
     volumes:
       - ca-data:/ca
+      # 喉咙通道(2026-11-07 用户令):语音模型宿主目录只读进容器 + 音频输出设备映射
+      #   语音模型目录经 CA_VOICE_DIR 注入(默认 ./runtime/voice);本机真值在 .env(不入库)
+      - ${CA_VOICE_DIR:-./runtime/voice}:/ca/voice:ro
+      - /dev/snd:/dev/snd
     networks:
       - ca-internal
     depends_on:

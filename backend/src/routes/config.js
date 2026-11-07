@@ -8,7 +8,9 @@ const readJson = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')); }
 export async function registerConfig(app, { CA, adminOk }) {
   const guard = async (req, reply) => { if (!adminOk(req)) { reply.code(403).send({ error: 'forbidden' }); return reply; } };
   const MODELS = path.join(CA, 'data', 'models.json');
-  const RKEYS = path.join(CA, 'config', 'runtime-keys.json');
+  // key 落点双树异构(2026-11-07 原生 WebUI):web=CA/config/runtime-keys.json,原生=~/.dsh/router-keys.json;
+  // env 覆盖,默认保 web 行为
+  const RKEYS = process.env.CA_KEYS_FILE ?? path.join(CA, 'config', 'runtime-keys.json');
   const WCONF = path.join(CA, 'state', 'wallet-config.json');
 
   // 读:模型配置全量(无凭据)+ 哪个 provider 已配 key(布尔,永不回传 key 本体)+ 日额度

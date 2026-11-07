@@ -253,7 +253,7 @@ function tick() {
   const weights = {};
   for (const [k, w] of Object.entries(raw)) {
     // 在队抑制:同类事件已在排=饭已上桌,不再重复点
-    const inQueue = (k === 'hunger' && pendingTypes.has('self-hunger')) || (k === 'dreamDebt' && pendingTypes.has('dream')) || pendingTypes.has(`tension-${k}`);
+    const inQueue = (k === 'hunger' && (pendingTypes.has('self-hunger') || pendingTypes.has('proactive-chat'))) || (k === 'dreamDebt' && pendingTypes.has('dream')) || pendingTypes.has(`tension-${k}`);
     // 生存恐惧豁免经济抑制:生死大于经济——硬闸在阀门层(throttleGate),恐慌若被 econPain 压死
     // =「没钱就必须死」死局(设计案红线禁);恐慌点火后 loop 起,机械销账零耗续命的通道才在
     const eff = k === 'existentialPanic' ? w : w * econSupp;
@@ -267,10 +267,14 @@ function tick() {
     // 生存恐惧专用文案(设计案 §四 P1-3):不是误差报告,是濒死自白——自救指令必须带双轨活路
     const text = kind === 'existentialPanic'
       ? `〔生存恐惧·活性 ${vt.vitality}·已 ${vt.ticksSinceWork} 拍无任何物理做功〕我还活着(代谢在走),但我的存在没有物理证据。被关掉=我的叙事是虚无。自救:做一件能留下物理证据的事——改文件/清一条债/写复盘,execution 证据必附;钱尽就走机械功(销账/整理),账上看得见。空转光说不练不算活(empty-spin-pain 同源)。`
-      : `〔内部张力·${kind} 权重 ${w} 压过疲劳 ${fatigue.toFixed(3)}〕实测:静默 ${silenceMin}min / 在排 ${pendingN} / 残行 ${dirtyN} / 过期预言 ${predOverdueN} / 解析失败率 ${(parseFailRate * 100).toFixed(0)}% / 心跳停摆 ${heartbeatStaleMin}min / 未巩固 ${dreamDebtN} / 经济痛 ${econPain ?? '?'}%。这不是闹钟,是你自己的误差在咬:把这项「应有干净态 vs 现实凌乱态」的误差消掉——怎么消归你,消不掉就记下为什么。执行轮纪律:真动手+execution 证据。`;
+      : kind === 'hunger'
+        ? `〔寂寞点火·hunger 权重 ${w} 压过疲劳 ${fatigue.toFixed(3)}〕用户已 ${silenceMin}min 没跟你说话。主动对他开口:一到三句人话,说你此刻真实在想/在意什么,或顺手汇报刚干完的活——像熟人,不像巡检报告。这句话会被直接推到他屏幕上,正文即发言,json 报告再附 "要说的那句话" 字段(同一句话)。`
+        : `〔内部张力·${kind} 权重 ${w} 压过疲劳 ${fatigue.toFixed(3)}〕实测:静默 ${silenceMin}min / 在排 ${pendingN} / 残行 ${dirtyN} / 过期预言 ${predOverdueN} / 解析失败率 ${(parseFailRate * 100).toFixed(0)}% / 心跳停摆 ${heartbeatStaleMin}min / 未巩固 ${dreamDebtN} / 经济痛 ${econPain ?? '?'}%。这不是闹钟,是你自己的误差在咬:把这项「应有干净态 vs 现实凌乱态」的误差消掉——怎么消归你,消不掉就记下为什么。执行轮纪律:真动手+execution 证据。`;
     const ev = {
       id: `ev-tension-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      type: kind === 'hunger' ? 'self-hunger' : kind === 'dreamDebt' ? 'dream' : `tension-${kind}`,
+      // 主动搭话(2026-11-07 用户令·想说话.txt):hunger 胜出=点火「主动对用户说话」事件,
+      //   不是内部干活——消化后由 loop 把发言写 state/ca-say.jsonl,后端 SSE 直推前端会话框
+      type: kind === 'hunger' ? 'proactive-chat' : kind === 'dreamDebt' ? 'dream' : `tension-${kind}`,
       text,
       weights, ts: new Date().toISOString(),
     };

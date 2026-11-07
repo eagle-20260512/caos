@@ -6,6 +6,7 @@ import { registerStatus } from './routes/status.js';
 import { registerLogs } from './routes/logs.js';
 import { registerAdmin } from './routes/admin.js';
 import { registerConfig } from './routes/config.js';
+import { registerP2P } from './routes/p2p.js';
 
 const CA = process.env.CA_HOME ?? '/ca';
 const PORT = Number(process.env.PORT ?? 8321);
@@ -30,6 +31,7 @@ await registerStatus(app, { CA });
 await registerLogs(app, { CA });
 await registerAdmin(app, { CA, adminOk });
 await registerConfig(app, { CA, adminOk });
+await registerP2P(app, { CA });
 
 app.get('/api/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 

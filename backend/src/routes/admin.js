@@ -2,6 +2,7 @@
 // recharge=充值(钱包 credit 文件,翻日自废) / sleep|wake=手动总闸(存在性文件)
 // auth-memory=失忆锁复活钥匙(生死锁 P2;钥匙只在用户,CA 自解锁=叛变)
 import { writeFileSync, renameSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const localDay = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
@@ -9,6 +10,8 @@ const atomicWrite = (f, s) => { const t = `${f}.tmp-${process.pid}`; writeFileSy
 
 export async function registerAdmin(app, { CA, adminOk }) {
   const guard = async (req, reply) => { if (!adminOk(req)) { reply.code(403).send({ error: 'forbidden' }); return reply; } };
+  // 引擎目录双树异构(2026-11-07 原生 WebUI):web=CA/engine,原生=CA/scripts;env 覆盖,默认保 web 行为
+  const ENGINE = process.env.CA_ENGINE_DIR ?? path.join(CA, 'engine');
 
   app.post('/api/admin/recharge', { preHandler: guard }, async (req, reply) => {
     const amount = Number(req.body?.amount ?? 0);
@@ -16,7 +19,15 @@ export async function registerAdmin(app, { CA, adminOk }) {
     atomicWrite(path.join(CA, 'state', 'wallet-credit.json'), JSON.stringify({ date: localDay(), creditCny: amount, ts: new Date().toISOString() }));
     // 烧穿锁一并解除(充值=用户明示开闸)
     try { unlinkSync(path.join(CA, 'state', 'budget-lock.json')); } catch { /* 无锁 */ }
-    return { recharged: amount, date: localDay() };
+    // 实时到账(2026-11-07 用户令「充值不能实时到账」):credit 落盘只是 Half——
+    //   余额快照 state/wallet.json 由代谢 60s 一拍刷新,充值后用户眼前最长滞后一分钟。
+    //   当场拉引擎钱包重算刷新快照(引擎在卷内=唯一真值源,后端不自己算钱,只调它)。
+    let wallet = null;
+    try {
+      const r = spawnSync('node', [path.join(ENGINE, 'ca-wallet.mjs')], { encoding: 'utf8', timeout: 15_000 });
+      if (r.status === 0) wallet = JSON.parse((r.stdout ?? '{}').trim());
+    } catch { /* 刷新失败=下拍代谢自愈,充值本身已到账 */ }
+    return { recharged: amount, date: localDay(), wallet: wallet ? { allowanceCny: wallet.allowanceCny, burnedCny: wallet.burnedCny, remainingCny: wallet.remainingCny, pct: wallet.pct } : null };
   });
 
   app.post('/api/admin/sleep', { preHandler: guard }, async () => {
