@@ -4,8 +4,10 @@
 // 痛(L2 事件)是一过性的,消化完就散;任务是跨事件实体——落空→bind.action 落成 task,不消化到 done 不散。
 // 账法:ledgers/tasks.jsonl append-only,同 id 后行盖前行(与 predictions 同构)。机械创建/推进/办结,语义归器官。
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { painToll } from './ca-pain-toll.mjs'; // 空转闸电费:无物理回执的 done=负反馈(2026-11-08)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
@@ -46,6 +48,12 @@ export function dueTasks() {
   return readAll().filter((t) => (t.state === 'open' || t.state === 'doing') && t.due && Date.parse(t.due) < now);
 }
 
+// 任务实体单源读(2026-11-08 用户裁·停止条件物理化:organ 机验停止/任务声明预算要读 checkCmd/budget 原文)
+export function taskOf(id) {
+  if (!id) return null;
+  return readAll().find((x) => x.id === id) ?? null;
+}
+
 // 预言→任务反查(loop 挂 CA_ORGAN_TASK 用):miss-born 任务的 pred 字段
 export function taskOfPred(pred) {
   if (!pred) return null;
@@ -71,9 +79,20 @@ export function budgetOf(id) {
   return { budget: t.budget, burnOut, remaining: Math.max(0, t.budget - burnOut), pct: Math.round((1000 * burnOut) / t.budget) / 10 };
 }
 
-export function touchTask(id, { state, note, evidence } = {}) {
+export function touchTask(id, { state, note, evidence, verified } = {}) {
   const t = readAll().find((x) => x.id === id);
   if (!t) return false;
+  // 空转闸(2026-11-08 主动性引爆重构·用户令「没有 check.cmd 的物理回执=空转,扣痛觉」):
+  //   带 checkCmd 的任务标 done 必须复跑物理判据(exit0 才准销);loop 机械销账调用带 verified:true 免复跑。
+  //   判据不过=拒销+friction 公示+痛觉电费(repeat 机制自然累进大额);任务保持 open,债不烂在暗处。
+  if (state === 'done' && t.checkCmd && !verified) {
+    const r = spawnSync('/bin/bash', ['-c', String(t.checkCmd)], { encoding: 'utf8', timeout: 10_000 });
+    if (r.status !== 0) {
+      try { appendFileSync(path.join(CA, 'ledgers', 'friction.jsonl'), JSON.stringify({ ts: new Date().toISOString(), kind: 'task-done-no-physical-proof', surface: 'ca-task', detail: `空转拒销:${id} 标 done 但 checkCmd 复跑 exit${r.status}——物理回执不过,嘴炮不销账(${String(t.goal ?? '').slice(0, 60)})`, evidence: `ledger:ledgers/tasks.jsonl#${id}`, verified: true }) + '\n'); } catch { /* 公示败不毁闸 */ }
+      try { painToll({ about: t.goal, why: 'task-done-no-physical-proof' }); } catch { /* 电费败不毁闸 */ }
+      return false;
+    }
+  }
   appendFileSync(TASKS, JSON.stringify({ id, ...(state ? { state } : {}), ...(note ? { lastNote: String(note).slice(0, 200) } : {}), ...(evidence ? { evidence: String(evidence).slice(0, 200) } : {}), progressN: (t.progressN ?? 0) + 1, lastTouch: new Date().toISOString() }) + '\n');
   return true;
 }

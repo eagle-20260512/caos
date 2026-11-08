@@ -27,6 +27,9 @@ export function allowanceToday() {
 export const REGIME_EPOCH = process.env.CA_WALLET_EPOCH ?? null;
 export const PRICING = { // ¥/百万 token
   'deepseek-chat': { inMiss: 2, inHit: 0.04, out: 8 },
+  // 定价漏键会让 organ 账里的 deepseek-flash 落 default(×2 保守价)→ 钱闸按虚高读数提前锁死。
+  //   官网实查价(与顶部注释口径一致),补上后账面立降约 50%。
+  'deepseek-flash': { inMiss: 2, inHit: 0.04, out: 8 },
   'glm-5.3': { inMiss: 4, inHit: 0.08, out: 16 }, // 待核,×2 保守
   default: { inMiss: 4, inHit: 0.08, out: 16 },
 };
@@ -125,17 +128,19 @@ export function reconcileWallet({ organPath: op, walletPath: wp } = {}) {
   // 快照是上一拍,额度改了(config/注资)快照仍旧,remainingTruth 会算成假账
   const live = walletToday();
   const w = { ...JSON.parse(readFileSync(wp || WALLET, 'utf8')), allowanceCny: live.allowanceCny };
-  // 窗起点与 walletToday 同口径:纪元(若设)或本地日 0 点,按 24h 整窗前滚
+  // 对账窗与主账同一 24h 滚窗:纪元(若设)或本地日 0 点起,按 24h 整窗前滚,并带 t1 上限——
+  // 只滚 t0 不设上限=从纪元全量求和,昨日烧量全进 truth,DRIFT 假阳性(假 DRIFT 根因)
   const now = new Date();
   const epoch = REGIME_EPOCH ? Date.parse(REGIME_EPOCH) : NaN;
   let t0 = Number.isFinite(epoch) ? epoch : new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   while (Number.isFinite(t0) && now.getTime() >= t0 + 86400e3) t0 += 86400e3;
+  const t1 = t0 + 86400e3;
   let burned = 0, lines = 0;
   for (const ln of readFileSync(organ, 'utf8').split('\n')) {
     if (!ln.trim()) continue;
     let o; try { o = JSON.parse(ln); } catch { continue; }
     const t = Date.parse(o.ts || o.time || '');
-    if (!Number.isFinite(t) || t < t0) continue;
+    if (!Number.isFinite(t) || t < t0 || t >= t1) continue;
     // 烧量字段两种形状都认:顶层 in/out/cacheRead(器官账本体)与 usage/tokens 子对象——只认子对象会恒算 ¥0=DRIFT 假阳性
     const u = o.usage || o.tokens || o;
     const p = P[o.model || 'deepseek-chat'] || P.default;

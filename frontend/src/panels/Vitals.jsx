@@ -10,6 +10,7 @@ export default function Vitals({ snap, onOpenConfig }) {
   const fat = snap?.metabolism?.fatigue;
   const econ = snap?.metabolism?.econPain;
   const dopa = snap?.dopamine;
+  const t = snap?.theory; // 理论五维(2026-11-08 深夜窗):自发率主读数+四维随行,全只读
   return (
     <header className={`vitals ${dying ? 'dying' : ''}`}>
       <div className="brand">CAOS</div>
@@ -37,6 +38,11 @@ export default function Vitals({ snap, onOpenConfig }) {
         <label>经济痛</label>
         <b>{econ != null ? `${econ}%` : '—'}</b>
         <span className="mini">穷则节食(权重抑制,非栏杆)</span>
+      </div>
+      <div className="cell">
+        <label>五维</label>
+        <b>{t && t.spontaneity != null ? `${t.spontaneity}%` : '—'}</b>
+        <span className="mini">{t ? `覆盖 ${t.coverage ?? '—'}% · 滞后 ${t.lagMin ?? '—'}min · 完成 ${t.completion ?? '—'}% · 修正 ${t.revision ?? '—'}%` : '待首测'}</span>
       </div>
       <div className="cell">
         <label>队列</label>

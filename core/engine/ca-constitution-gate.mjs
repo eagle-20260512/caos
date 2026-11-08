@@ -26,6 +26,11 @@ export const CONSTITUTION = new Set([
   'write-jsonl-atomic.mjs', // 账本原子写
   'ca-recovery.mjs', 'ca-archiver.mjs', // 恢复对账+归档熔断(2026-11-08 用户批:宪法名单扩容)
   'ca-futures.mjs', 'ca-discount.mjs', 'ca-vision.mjs', // 未来推演+痛觉贴现+愿景偏差(2026-11-08 用户批:推演器锁死,CA 无权改自己的「死期算法」与「理想标准」)
+  // 宪法边界补全(差距审计实锤「宪法区比宣称的窄」):
+  //   代谢脑/思考器官/任务闸/编译器/叙事账本 五件入宪——调度/回写/销账/驱动包/自我叙事全是判官面,
+  //   被约束者不得自改(谋改走 patch 挂起流);理论五维测量器同格(判官不可改自己的尺)。
+  'ca-metabolism.mjs', 'ca-organ.mjs', 'ca-task.mjs', 'ca-compiler.mjs', 'ca-narrative.mjs',
+  'ca-theory-metrics.mjs',
 ]);
 export const isConstitution = (absOrRel) => CONSTITUTION.has(path.basename(String(absOrRel)));
 

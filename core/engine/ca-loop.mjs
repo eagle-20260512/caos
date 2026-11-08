@@ -571,6 +571,21 @@ export async function drainOnce() {
         }
         if (dupEids.length) writeCursor(done);
       }
+      // 事件合批(2026-11-08 用户令·止血第二刀C):pain/organ-followup 是自激环主流量(实弹单日 51 pain+39 followup,
+      //   每件各烧一次全价编译+思考)。同型在排件合成一次编译+一次消化,成员在刺激里逐条点名、报告逐条着落。
+      //   纪律:①只合同型 system 件(user-say/机械面 promise-due/forge 执行件绝不入批;protected 件不入批防饿死口径失真)
+      //   ②帽 BATCH_CAP(阀外 CA_LOOP_BATCH_CAP,缺省 6)③成员行号一并结清=at-least-once 语义不变,消化账点名全批可稽。
+      const BATCHABLE = new Set(['pain', 'organ-followup']);
+      const BATCH_CAP = Math.max(2, Number(process.env.CA_LOOP_BATCH_CAP ?? 6));
+      const batch = [next];
+      if (BATCHABLE.has(ev.type)) {
+        for (const j of pending.slice(1)) {
+          if (batch.length >= BATCH_CAP) break;
+          const o = events[j];
+          if (o && o.type === ev.type && !isProtected(j)) batch.push(j);
+        }
+        if (batch.length > 1) log({ event: 'batch-formed', type: ev.type, size: batch.length, lines: batch.map((i) => i + 1) });
+      }
       // 机械执行体先行(零 LLM;TM 入图思想:可确定推理不烧器官)
       const mech = mechanical(ev);
       if (mech.handled) {
@@ -585,8 +600,20 @@ export async function drainOnce() {
         done.add(next); writeCursor(done); drained++;
         continue;
       }
-      const stim = stimulusOf(ev);
-      const { dp, err } = compileDp(stim.text, `ledger:state/event-queue.jsonl#L${next + 1}`, stim.channel);
+      let stim;
+      if (batch.length > 1) {
+        const members = batch.map((i, k) => {
+          const m = events[i];
+          return `〔${k + 1}/${batch.length}〕(${m.type} ${String(m.id ?? `line-${i}`)} @${String(m.ts ?? '').slice(5, 16)}) ${String(m.text ?? '').slice(0, 300)}`;
+        });
+        stim = { text: `合批·同型事件 ${batch.length} 件一次消化(逐条有着落,报告逐条回应;pain 批的 pain_deduction 给数组,每条 pain_ref 对应该件落空 id;followup 批的 execution 须覆盖批内每件动作):\n${members.join('\n')}`, channel: stimulusOf(ev).channel };
+      } else {
+        stim = stimulusOf(ev);
+      }
+      // 合批来源指针:narrative 的 source 解析器只认单行号格式(实弹 compile-fail:L2482+L2483 不可解析),
+      //   指针用首件行号,成员全名单在刺激文本与 batch-formed/batch-consumed 账里(append-only 可稽)。
+      const batchSrc = `ledger:state/event-queue.jsonl#L${next + 1}`;
+      const { dp, err } = compileDp(stim.text, batchSrc, stim.channel);
       if (err) {
         log({ event: 'compile-fail', id: eid, err });
         reconcileEvent(ev, eid, `ledger:state/event-queue.jsonl#L${next + 1}`);
@@ -599,7 +626,7 @@ export async function drainOnce() {
         if (ev.type === 'user-say') {
           try { mkdirSync(REPLIES, { recursive: true }); atomicWrite(path.join(REPLIES, `${eid}.json`), JSON.stringify({ id: eid, ts: new Date().toISOString(), answer: `〔如实·compile-fail〕驱动包编译失败(${String(err).slice(0, 120)})。话已在账,修复后重发即可——不用连发。`, usage: null, ms: 0, ok: false, organFailed: true }) + '\n'); } catch { /* 回执写败不毁循环 */ }
         }
-        done.add(next); writeCursor(done); continue;
+        for (const j of batch) done.add(j); writeCursor(done); continue; // 合批:编译失败整批结行号(账在 compile-fail 日志点名批次)
       }
       const traceFile = path.join(CA, 'state', 'organ-trace', `${eid}.jsonl`);
       try { mkdirSync(path.dirname(traceFile), { recursive: true }); } catch { /* */ }
@@ -620,13 +647,15 @@ export async function drainOnce() {
       // L2 预算挂账(清算协议·债4):事件能落到任务实体(task 直挂或 miss-born 反查)就把任务 id 递给器官——开局读预算,收口还烧量
       let organTask = null;
       try { organTask = ev.task ?? taskOfPred(ev.pred); } catch { /* 反查坏不挡消化 */ }
-      // 软着陆档(2026-11-06 根治批):执行件递 output 预算锚 16k(≈2 个满轮干活量;why:锚定「干活量由产出衡量」,阀外可经 CA_LOOP_OUTBUDGET 调;递减早停防磨洋工)
-      // [2026-11-08 pain 强制降轮·用户令] 痛觉研判不需要 13 轮工程面:pain 件 max-rounds 缺省=calib 内生值(先验 4,=5 轮收口,
-      //   「我算不出来」也是结论);env CA_LOOP_PAIN_ROUNDS 仍是硬覆盖(阀外手动);其它执行件照旧 12。
-      const execRounds = ev.type === 'pain' ? Number(process.env.CA_LOOP_PAIN_ROUNDS ?? calibValue('pain-rounds', 4)) : Number(process.env.CA_LOOP_EXEC_ROUNDS ?? 12);
+      // 软着陆档(2026-11-06 根治批):执行件递 output 预算锚(why:锚定「干活量由产出衡量」,阀外可经 CA_LOOP_OUTBUDGET 调;递减早停防磨洋工)
+      // [2026-11-08 用户裁·轮帽兜底化] 固定轮次配额(止血档 5/pain calib 4)废除:正常退出只认
+      //   ①模型这拍不发 tool_use(自然停)②任务 checkCmd 机验 exit0(物理验收)——CC 范式考据:maxTurns 在 CC 也只是
+      //   按主体定的纯兜底,缺省不设限。此处轮帽=防死循环兜底 20,env CA_LOOP_EXEC_ROUNDS 阀外手动覆盖;
+      //   calib pain-rounds 规格留档(消费面摘,不再配额)。
+      const execRounds = Number(process.env.CA_LOOP_EXEC_ROUNDS ?? 20);
       // evidence 核验制(2026-11-08 用户裁·执行轮强制快照比对):跑前快照,跑后差分——宣称改文件而指纹未变=伪证
       const execSnap = isExec ? gateSnap() : null;
-      const r = await runOrgan([ORGAN, 'run', '--dp', dp, '--source', `ledger:state/event-queue.jsonl#L${next + 1}`, '--channel', stim.channel, '--json', ...(isExec ? ['--max-rounds', String(execRounds)] : [])], { CA_ORGAN_TRACE: traceFile, CA_ORGAN_BUDGET_MS: String(capMs - 60_000), ...(organTask ? { CA_ORGAN_TASK: organTask } : {}), ...(isExec ? { CA_ORGAN_MAXTOK: '8000', CA_ORGAN_OUTBUDGET: String(Number(process.env.CA_LOOP_OUTBUDGET ?? 16000)) } : {}), ...(ev.type === 'user-say' ? { CA_ORGAN_STREAM: path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`) } : {}) }, capMs, preemptCheck);
+      const r = await runOrgan([ORGAN, 'run', '--dp', dp, '--source', `ledger:state/event-queue.jsonl#L${next + 1}`, '--channel', stim.channel, '--json', ...(isExec ? ['--max-rounds', String(execRounds)] : [])], { CA_ORGAN_TRACE: traceFile, CA_ORGAN_BUDGET_MS: String(capMs - 60_000), ...(organTask ? { CA_ORGAN_TASK: organTask } : {}), ...(isExec ? { CA_ORGAN_MAXTOK: '8000' } : {}), ...(ev.type === 'user-say' ? { CA_ORGAN_STREAM: path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`) } : {}) }, capMs, preemptCheck);
       const wallMs = Date.now() - tW0; // 含编译+思考的全程墙钟:退场悬挂回归闸(exp-organ-linger)的仪表
       if (r.preempted) { starve[`L${next}`] = (starve[`L${next}`] ?? 0) + 1; writeStarve(starve); log({ event: 'preempted', id: eid, type: ev.type, starve: starve[`L${next}`], protected: isProtected(next) }); writeWM(eid, ev.type, 'preempted', ev.text); continue; } // 让位:重扫即上用户件;抢占计数进防饿死账
       let out = null;
@@ -747,7 +776,19 @@ export async function drainOnce() {
           if (rt[retryKey]) { delete rt[retryKey]; writeRetry(rt); } // 成功销退避账
         }
       }
-      done.add(next); writeCursor(done); drained++;
+      if (batch.length > 1) { // 合批收口:成员行号一并结清,对账/工作记忆逐件落,批账点名可稽
+        for (const j of batch.slice(1)) {
+          const m = events[j]; if (!m) continue;
+          const mid = String(m.id ?? `line-${j}`);
+          reconcileEvent(m, mid, `ledger:state/event-queue.jsonl#L${j + 1}`);
+          writeWM(mid, m.type, ok ? 'ok' : 'fail', m.text);
+          done.add(j);
+          if (starve[`L${j}`]) { delete starve[`L${j}`]; }
+        }
+        if (batch.length > 1) writeStarve(starve);
+        log({ event: 'batch-consumed', type: ev.type, size: batch.length, ok, head: eid });
+      }
+      for (const j of batch) done.add(j); writeCursor(done); drained += batch.length;
       if (starve[`L${next}`]) { delete starve[`L${next}`]; writeStarve(starve); } // 办结销防饿死账(漏清也有拍首清账兜底)
     }
     reconcileDeadlines(); // 截止对账:到期未中=落空(occur)/应验(absent);cmd 型=机械断言
@@ -759,10 +800,22 @@ export async function drainOnce() {
       let lastSpawn = 0;
       try { const hb = readFileSync(path.join(CA, 'ledgers', 'reflex-heartbeat.jsonl'), 'utf8').split('\n').filter(Boolean).filter((l) => l.includes('"reflex":"crystal"')); if (hb.length) lastSpawn = Date.parse(JSON.parse(hb[hb.length - 1]).ts) || 0; } catch { /* 无账=从未 */ }
       if (painsToday >= 3 && Date.now() - lastSpawn > 3600e3) {
-        spawn('node', [path.join(HERE, 'ca-crystallize.mjs'), '--pending', '--auto'], { detached: true, stdio: 'ignore', cwd: CA }).unref();
+        // [2026-11-08 根修·结晶空转] 旧点火不带 --cc=结晶器读 DSH 面空账(未处理 0 条,候选供给 10-30 已断),
+        //   而候选全产在 CC 面(candidates/,积压 214 条无人消费)——点火 853 次全打空靶。加 --cc 对上真队列。
+        spawn('node', [path.join(HERE, 'ca-crystallize.mjs'), '--cc', '--pending', '--auto'], { detached: true, stdio: 'ignore', cwd: CA }).unref();
         log({ event: 'crystal-ignited', painsToday });
       }
     } catch { /* 点火失败不毁循环 */ }
+    // 理论五维指标(2026-11-08 用户令·第三刀B):验证学缺口落地——自发率/覆盖率/滞后/完成率/修正率,
+    //   机械零LLM,1h TTL 节流(每 pass 都跑=账本复读浪费);读数差=疼,禁为美化读数改账。
+    try {
+      const TM_LAST = path.join(CA, 'state', 'theory-metrics-last.json');
+      let lastTm = 0; try { lastTm = Date.parse(JSON.parse(readFileSync(TM_LAST, 'utf8')).ts ?? '') || 0; } catch { /* 无账=从未 */ }
+      if (Date.now() - lastTm > 3600e3) {
+        spawnSync('node', [path.join(HERE, 'ca-theory-metrics.mjs')], { encoding: 'utf8', timeout: 30_000 });
+        writeFileSync(TM_LAST, JSON.stringify({ ts: new Date().toISOString() }) + '\n');
+      }
+    } catch { /* 指标器坏不毁循环 */ }
     sweepDuePromises(); // 期票机制:到期承诺→promise-due 事件(一诺一票)
     sweepDueTasks(); // 清算协议(2026-11-06 用户令):到期任务机械对账——checkCmd 成立=机械销账,不成立=task-due 发作
     // 多巴胺引擎尾扫:进化候选验证+发放(机械零LLM,轻量;失败不毁循环)

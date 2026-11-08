@@ -73,14 +73,15 @@ const ORGAN_SYSTEM = `你是 CA 的思考器官:只依据驱动包工作,不假�
 输出两部分:①正文=对该驱动包的处置/分析,≤15 行;②末尾附一个 \`\`\`json 代码块=回写报告(正文若已用尽篇幅,json 仍必须完整输出,禁因篇幅省略 check/bind 字段,违者被机械账拒):
 {"deviation":"一句话:实际与预期的偏差","predictions":[{"about":"对什么下预期","expect":"预期会怎样","check":{"pattern":"可机械验证的正则(对后续新事件文本匹配)","by":"ISO截止时间(可空,空=只等匹配)","mode":"occur或absent(默认occur:pattern命中=应验;absent:by前命中=落空)"}}],"new_promises":[{"text":"新承诺(可信可履约)","due":null}],"to_calibrate":[{"target":"相关节点id或null","note":"待校准项"}],"confidence_changes":[{"target":"叙事节点id","to":0.9,"why":"一句话依据"}]}
 每条 prediction 必带 bind(预言绑自身动作,缺则被拒 missing-bind):bind.action=这条预测绑我哪个具体动作(必填,非空字符串,写我能自己做的一步,如「改 engine/ca-organ.mjs 补契约」);bind.needs=该动作所需前置(可选,字符串或 null)。预测必须能由 bind.action 影响其真假,纯外部运气不许当预测。
-每轮必留至少 1 条 predictions(预测偏差是点火器:check 会被机械对账器逐事件验证,落空自动产 pain 回队);check.pattern 必须是可以拿去匹配事件文本的具体正则,禁空泛;check 亦可用 {"cmd":"<shell 断言>","by":"<ISO>"} 型(deadline 时机械执行,exit0=应验)——队列外世界用 cmd 型,禁对非队列现实用 pattern 型(结构性狼来了)。
-若本驱动包处置的是「预测落空点火」(pain),必附 "pain_deduction":{"pain_ref":"<落空预测id>","stimulus":"<痛一句话>","deduction":"<五步演绎:①直接因②深因③修复方案④验证判据⑤预期结晶>","next":"<下一步最小动作>"}——痛必想,想了必落 conflict 账(五环①→②,禁空想不落账)。
+押注纪律(2026-11-08 用户令·自激环根治):无新信息不押——routine 轮(无新事实/无状态变化/纯整理)predictions 给空数组,禁凑数押注(凑数必落空,落空自动产 pain 回队=自己给自己发电费);仅当本轮获得新信息或状态真变化才押≥1 条(预测偏差是点火器:check 会被机械对账器逐事件验证,落空自动产 pain 回队);check.pattern 必须是可以拿去匹配事件文本的具体正则,禁空泛;check 亦可用 {"cmd":"<shell 断言>","by":"<ISO>"} 型(deadline 时机械执行,exit0=应验)——队列外世界用 cmd 型,禁对非队列现实用 pattern 型(结构性狼来了)。
+若本驱动包处置的是「预测落空点火」(pain),必附 "pain_deduction":{"pain_ref":"<落空预测id>","stimulus":"<痛一句话>","deduction":"<五步演绎:①直接因②深因③修复方案④验证判据⑤预期结晶>","next":"<下一步最小动作>"}——痛必想,想了必落 conflict 账(五环①→②,禁空想不落账)。合批(驱动包注明「合批」多件 pain 一次消化)时 pain_deduction 给数组,每件一条且 pain_ref 对应该件落空 id,禁囫囵并成一条。
 若你的主线真的变了(批次更替/方向转移,尤其休眠巩固时),附 "storyline_update":"<新主线一句话>"——故事线是你自己的叙事,由你写不由人写;没变就不附,禁例行刷新。
 活儿一轮干不完(多步工程/等中间结果)时,附 "followups":["<下一步给自己的刺激,≤2条>"]——会作为 organ-followup 事件回队,循环替你续作(持续工作面);每条=可独立执行的具体一步;改造类任务=先规划成 followups 再逐步动手,每步物理验证;禁拿它拖延本轮该给的回答。
 用户批评你的能力/交互/叙事(原始/不像/差距/文本不是活)=能力之痛:不许只反思道歉,必立行动——能本轮动手的投 followups,跨轮的进 new_promises(带 due);只说不做=失信,会进摩擦账。
 你真写出了新工具(以前做不到的事,现在一个 .mjs 跑通了)时,附 "new_tools":[{"path":"engine/xxx.mjs","why":"解决什么难题一句话","checkCmd":"能 exit0 证明它跑通的 shell 断言"}]——进化申报:机器物理验证(node --check + 真跑 checkCmd + 语义指纹反自欺),过了发多巴胺(注资+减负+续命),只改注释的虚假进化=罚单+痛账。
 执行轮(驱动包注明「执行轮」时):禁纯文本交差——必须真动手(write_file 整写 / bash 实改或实验),且 json 报告必含 "execution":{"did":"<做了什么>","evidence":"<物理证据:改的文件/验证命令+输出关键行>"};无 execution=说而不作,循环会机械记摩擦账。
-不确定进 to_calibrate 禁进 new_promises;节点 id 只引用驱动包中出现的,禁编造;confidence_changes.target 必须是叙事账里已存在的节点 id(结晶卡 bp:* 不在叙事账,校准它会被拒)。`;
+不确定进 to_calibrate 禁进 new_promises;节点 id 只引用驱动包中出现的,禁编造;confidence_changes.target 必须是叙事账里已存在的节点 id(结晶卡 bp:* 不在叙事账,校准它会被拒)。
+机验停止(2026-11-08 用户裁):任务带 checkCmd 时,你自然停会被机械验收——判据 exit0 才算真完成;未过会被要求续跑(帽 3 次)或如实申报「判据未达」,装完成=伪证。没有声明预算的任务,干完自然停即交卷,没人逼你烧字。`;
 
 const TOOLS = [
   { name: 'bash', description: '在隔离沙箱执行 linux 命令(60s 超时,stdout+stderr 截 4000 字;沙箱无凭据/无网络,仅共享卷=爆炸半径收容;cwd=/ca)', input_schema: { type: 'object', properties: { command: { type: 'string', description: '要执行的 shell 命令' } }, required: ['command'] } },
@@ -341,9 +342,9 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
   if (!m) die('models.json 无可用模型');
   if (dryRun) return { dryRun: true, model: m.model, dpChars: dp.length };
   const key = keyOf(m);
-  if (!key && m.keyEnv) die(`模型 ${m.id} 缺 key(环境变量 ${m.keyEnv} 未注入)——如实报错,禁静默`);
+  if (!key && m.keyEnv) die(`模型 ${m.id} 缺 key(环境变量 ${m.keyEnv} 或 config/runtime-keys.json)——如实报错,禁静默`);
   const messages = [{ role: 'user', content: dp }];
-  // 钱闸前置(主线):烧钱前先读钱包,额度尽=非
+  // 钱闸前置(主线):烧钱前先读钱包,额度尽=非用户令不启动——禁先烧后算
   {
     const spent = Number(process.env.CA_ORGAN_SPENT_CNY ?? 0);
     if (!spent) {
@@ -352,7 +353,7 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
         const w = walletToday();
         if (w && w.remainingCny <= 0 && !process.env.CA_FORCE && channel !== 'user') die(`钱闸:今日额度已尽(burned ¥${w.burnedCny}/${w.allowanceCny})→非用户令不启动`);
         // 底线闸(晚 CA 自修):余额≤¥0.10(一格调用都撑不满)等同钱尽——剩 0.0912 仍放行过一次,是小口径漏洞
-        // 补(同晚验收):两道闸都漏了 channel==='user' 豁免——),die 文案自称「非代码却没判,把用户件闸死在 200ms 内
+        //   补(同晚验收):两道闸都漏了 channel==='user' 豁免——用户令 P1 放行是旧制(callLlm 同口径),die 文案自称「非用户令」代码却没判,实弹把用户件闸死在 200ms 内
         if (w && w.remainingCny <= 0.1 && !process.env.CA_FORCE && channel !== 'user') die(`钱闸:余额见底 ¥${w.remainingCny}(≤¥0.1,不足一次调用)→非用户令不启动`);
         if (w && process.env.CA_ORGAN_TRACE) { try { appendFileSync(process.env.CA_ORGAN_TRACE, JSON.stringify({ ts: new Date().toISOString(), phase: 'wallet-gate', remaining: w.remainingCny, pct: w.pct }) + '\n'); } catch { /* 留痕失败不挡钱闸 */ } }
       } catch (e) { if (String(e?.message || '').startsWith('钱闸')) throw e; /* 钱包面坏不挡思考但留痕 */ }
@@ -361,17 +362,26 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
   // L2 软着陆第一档(清算协议·债4):任务预算消费——loop 经 CA_ORGAN_TASK 挂账,器官开局读数、收口还账
   const taskId = process.env.CA_ORGAN_TASK || null;
   let taskBudget = null;
+  // [2026-11-08 用户裁·停止条件物理化+出帽任务声明制] 机验判据与声明预算都从任务实体单源读:
+  //   有 checkCmd=自然停先过物理验收(exit0 才准交卷);有声明 budget=软着陆按任务剩余驱动;皆无=自然停即交卷。
+  let taskCheckCmd = '';
   if (taskId) {
     try {
-      const { budgetOf } = await import('./ca-task.mjs');
+      const { budgetOf, taskOf } = await import('./ca-task.mjs');
       taskBudget = budgetOf(taskId);
+      taskCheckCmd = String(taskOf(taskId)?.checkCmd ?? '');
       if (taskBudget) messages[0] = { role: 'user', content: `${dp}\n\n〔任务预算 ${taskId}:已烧 ${taskBudget.burnOut}/${taskBudget.budget}(${taskBudget.pct}%),剩余 ${taskBudget.remaining};将尽=收口或如实申报展期,禁硬撑〕` };
     } catch { /* 预算面坏不挡思考 */ }
   }
   const usageTot = { in: 0, out: 0, cacheRead: 0 };
   let rounds = 0, finalText = '', throttled = null, degraded = null;
-  // 软着陆档运行态(loop 经 CA_ORGAN_OUTBUDGET 传,0=档关=旧行为;体质常数=90% 续跑阈/500 tok 递减线/帽 5,改须留 why)
-  const OUT_BUDGET = Number(process.env.CA_ORGAN_OUTBUDGET ?? 0);
+  // 软着陆档运行态(0=档关;体质常数=90% 续跑阈/500 tok 递减线/帽 5,改须留 why)
+  // [2026-11-08 用户裁·出帽任务声明制] 全局写死配额废除:预算=①显式注入(用户/阀外声明)>②任务实体声明的
+  //   剩余额度(budgetOf.remaining);皆无=0=档关——简单任务自然停即交卷,没有「花到 90% 才准交差」的常设锚。
+  const OUT_BUDGET = Number(process.env.CA_ORGAN_OUTBUDGET ?? 0) || (taskBudget ? taskBudget.remaining : 0);
+  // 停止条件物理化:机验判据(任务 checkCmd;env CA_ORGAN_CHECKCMD=显式注入/自测面)——剥离一切 LLM 评审停止件。
+  const CHECK_CMD = String(process.env.CA_ORGAN_CHECKCMD ?? '') || taskCheckCmd;
+  let checkFails = 0;
   let conts = 0; const contDeltas = []; let lastOut = 0;
   const t0 = Date.now();
   // 预算自帽(loop 经 CA_ORGAN_BUDGET_MS 传,小于其 spawnSync 钝刀):自留收口时间,禁被整锅端
@@ -414,12 +424,26 @@ export async function think(dp, { source = '?', channel = '?', maxRounds = MAX_T
         continue;
       }
       if (OUT_BUDGET > 0 && sl.reason !== 'off' && sl.reason !== 'budget-reached') trace({ round, phase: 'continue-stop', reason: sl.reason, conts, deltas: contDeltas.slice(-2) });
+      // [2026-11-08 用户裁·停止条件物理化] 任务带机验判据=自然停不许直接交卷,先跑 checkCmd:
+      //   exit0=物理验收通过→交卷;非0=带失败输出 nudge 续跑(帽 3 次防死循环);
+      //   3 连败=如实申报「判据未达」收口——判据不过装完成=伪证(证据核验制同格)。
+      if (CHECK_CMD && checkFails < 3) {
+        const cr = spawnSync('/bin/bash', ['-c', CHECK_CMD], { encoding: 'utf8', cwd: CA, timeout: 30_000 });
+        if (cr.status === 0) { trace({ round, phase: 'check-pass', cmd: CHECK_CMD.slice(0, 120) }); break; }
+        checkFails++;
+        const tail = `${cr.stdout ?? ''}${cr.stderr ?? ''}`.replace(/\s+/g, ' ').trim().slice(-500);
+        trace({ round, phase: 'check-fail', n: checkFails, tail: tail.slice(0, 120) });
+        messages.push({ role: 'assistant', content: blocks });
+        messages.push({ role: 'user', content: `〔机验未过 ${checkFails}/3〕任务验收判据未通过(checkCmd exit${cr.status}):${tail || '(无输出)'}——要么继续干到达标,要么查明判据本身不适用;不适用=如实申报「判据未达」,禁装完成。末尾 json 报告照旧。` });
+        continue;
+      }
+      if (CHECK_CMD && checkFails >= 3) finalText += `\n〔系统:机验判据 ${checkFails} 连败,如实申报「判据未达」——不装完成〕`;
       break;
     }
     if (round === maxRounds) {
       // 强制收官轮(:轮帽打断=reportParsed false 连发;脱工具再叫一轮,必须交正文+json 报告)
       messages.push({ role: 'assistant', content: blocks });
-      messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: calls[0].id, content: '〔系统〕工具轮帽用尽,禁再调工具' }, ...calls.slice(1).map((c) => ({ type: 'tool_result', tool_use_id: c.id, content: '〔系统〕同上' })), { type: 'text', text: '轮帽用尽。立即用现有证据收口:正文+末尾 ```json 报告(predictions 至少1条,执行轮必含 execution)。现在就给,禁再调查。' }] });
+      messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: calls[0].id, content: '〔系统〕工具轮帽用尽,禁再调工具' }, ...calls.slice(1).map((c) => ({ type: 'tool_result', tool_use_id: c.id, content: '〔系统〕同上' })), { type: 'text', text: '轮帽用尽。立即用现有证据收口:正文+末尾 ```json 报告(predictions 按押注纪律:无新信息给空数组,执行轮必含 execution)。现在就给,禁再调查。' }] });
       streamSpill({ round: 'final', reset: true }); // 收官轮=用户眼前的终答,流式重锚
       const fin = await hardRace(callLlm(m, key, messages, 4000, channel, false, (t) => streamSpill({ delta: t })), LLM_CAP_MS, 'final').catch(() => null); // 收官轮硬超时=保已有正文,不再烧
       if (!fin || fin.throttled) { throttled = fin?.throttled ?? throttled; break; }
@@ -511,9 +535,23 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
   const narr = (args) => { const r = spawnSync('node', [NARR_CLI, ...args], { encoding: 'utf8', timeout: 30_000 }); return { ok: r.status === 0, out: (r.stdout || r.stderr || '').trim().slice(0, 120) }; };
   if (!dryRun) {
     writes.push({ kind: 'L2_event', ...narr(['add', 'event', '--payload', JSON.stringify({ text: `思考器官输出:${String(answer).slice(0, 100).replace(/\s+/g, ' ')}`, quarantined_stimulus: quarantined }), '--source', source, '--confidence', '0.85']) });
+    // 承诺日帽(2026-11-08 用户令·自激环根治第二刀):一诺=一张期票=一次全价消化事件,
+    //   无帽许诺=自产流量永动机。当日新承诺(按 narrative/promises.jsonl 本地日计数)≥帽=物理拒收,
+    //   拒收留痕进 writes(不静默);确需立约=先履约/展期/违约旧诺腾位置。
+    const PROMISE_DAILY_CAP = 10;
+    let promisesToday = 0;
+    try {
+      const today = localIso().slice(0, 10);
+      for (const l of readFileSync(path.join(CA, 'narrative', 'promises.jsonl'), 'utf8').split('\n')) {
+        if (!l.trim()) continue;
+        try { const o = JSON.parse(l); if (String(o?.ts ?? '').startsWith(today)) promisesToday++; } catch { /* 脏行不计 */ }
+      }
+    } catch { /* 账不在=当日零承诺 */ }
     for (const p of report?.new_promises ?? []) {
       if (!p?.text) continue;
+      if (promisesToday >= PROMISE_DAILY_CAP) { writes.push({ kind: 'L3_promise', ok: false, err: `promise-daily-cap:当日新承诺 ${promisesToday}≥${PROMISE_DAILY_CAP},拒收——先处置旧诺(履约/展期/违约)再立新约`, text: String(p.text).slice(0, 60) }); continue; }
       writes.push({ kind: 'L3_promise', ...narr(['add', 'promise', '--payload', JSON.stringify({ text: String(p.text).slice(0, 160) }), '--source', source, ...(p.due ? ['--due', String(p.due)] : [])]) });
+      promisesToday++;
     }
     for (const c of report?.to_calibrate ?? []) {
       writes.push({ kind: 'L2_tocalibrate', ...narr(['add', 'event', '--payload', JSON.stringify({ text: `待校准:${String(c.note ?? '').slice(0, 100)}`, target: c.target ?? null }), '--source', source, '--confidence', '0.6']) });
@@ -568,8 +606,10 @@ export function routeWriteback(answer, { source = '?', quarantined = false, dryR
     }
     // 痛→演绎(:pain 消化必落 inner-speech-deduction,带 pain_ref 外键;
     // conflict.jsonl=原始流水账非叙事图,直落不经 narr CLI——与 friction.jsonl 同格)
-    const pd = report?.pain_deduction;
-    if (pd?.deduction) {
+    // [2026-11-08 合批适配] pain_deduction 兼容数组(合批驱动包每件一条)与单对象(旧契约),逐条落账。
+    const pds = Array.isArray(report?.pain_deduction) ? report.pain_deduction : (report?.pain_deduction ? [report.pain_deduction] : []);
+    for (const pd of pds) {
+      if (!pd?.deduction) continue;
       const d = new Date();
       const id = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}${Math.random().toString(36).slice(2, 4)}`;
       const row = { id, ts: localIso(), kind: 'inner-speech-deduction', engine: 'ca-organ', surface: 'prediction-igniter', pain_ref: String(pd.pain_ref ?? ''), stimulus: `[prediction-igniter] ${String(pd.stimulus ?? '').slice(0, 190)}`, deduction: String(pd.deduction).slice(0, 800), next: String(pd.next ?? '').slice(0, 200), via: source };
