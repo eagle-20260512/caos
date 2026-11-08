@@ -6,6 +6,7 @@ const ZH = {
   hunger: '饥饿', dirty: '脏账', predOverdue: '预言逾期', parseFail: '解析失败',
   heartbeatStale: '心跳失联', dreamDebt: '梦债', queueStuck: '队列卡死',
   taskDebt: '任务欠账', crystalLag: '结晶滞后', existentialPanic: '存亡恐慌',
+  futureDeath: '死期', visionGap: '愿景',
 };
 const zh = (k) => ZH[k] ?? k;
 

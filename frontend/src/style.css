@@ -97,13 +97,10 @@ h3 { font-size: 13px; color: #8b949e; margin: 14px 0 6px; }
 .config-panel .row { display: flex; gap: 8px; }
 .cfg-msg { color: #d29922; font-size: 12px; }
 
-/* 未来面板(批次三 2026-11-08):死期倒计时条,全幅在 Vitals 之下;用户令:单行不折行,卡片紧凑 */
-.futures { display: flex; gap: 8px; padding: 4px 12px; background: #0d1117; border-bottom: 1px solid #30363d; flex-wrap: nowrap; overflow-x: auto; }
-.futures .fcell { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 3px 10px; min-width: 110px; flex: 0 0 auto; }
-.futures .fcell label { display: block; font-size: 10px; color: #8b949e; white-space: nowrap; }
-.futures .fcell b { font-size: 14px; }
-.futures .fcell .mini { display: block; font-size: 9px; color: #6e7681; white-space: nowrap; }
-.futures .fcell .locks { font-size: 11px; color: #58a6ff; }
-.futures .clock .tdeath { font-size: 20px; font-variant-numeric: tabular-nums; color: #3fb950; letter-spacing: 1px; }
-.futures.dying .clock { border-color: #f85149; animation: pulse 1.2s infinite; }
-.futures.dying .clock .tdeath { color: #f85149; }
+/* 未来细胞组(批次三 2026-11-08·用户令:并入 Vitals 单行,卡片紧凑,全中文简写) */
+.vitals .cell { min-width: 0; padding: 4px 10px; }
+.vitals .cell label, .vitals .cell .mini { white-space: nowrap; }
+.vitals .fclock .tdeath { font-size: 20px; font-variant-numeric: tabular-nums; color: #3fb950; letter-spacing: 1px; }
+.vitals .fclock.alarm { border-color: #f85149; animation: pulse 1.2s infinite; }
+.vitals .fclock.alarm .tdeath { color: #f85149; }
+.vitals .cell .locks { font-size: 12px; color: #58a6ff; }

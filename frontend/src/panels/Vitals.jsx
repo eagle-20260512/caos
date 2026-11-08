@@ -1,6 +1,7 @@
 import React from 'react';
+import FuturesCells from './Futures.jsx';
 
-// 生命体征头:活性(濒死红闪)/钱包/疲劳/经济痛——CA 的「还活着吗」一眼面
+// 生命体征头:活性(濒死红闪)/钱包/疲劳/经济痛+未来细胞组(预期死期/贴现痛觉/愿景偏差)——单行总览
 export default function Vitals({ snap, onOpenConfig }) {
   const v = snap?.vitality?.vitality;
   const state = snap?.vitality?.state ?? '…';
@@ -11,7 +12,7 @@ export default function Vitals({ snap, onOpenConfig }) {
   const dopa = snap?.dopamine;
   return (
     <header className={`vitals ${dying ? 'dying' : ''}`}>
-      <div className="brand">CAOS<span className="sub">认知智能体操作系统</span></div>
+      <div className="brand">CAOS</div>
       <div className={`cell ${dying ? 'alarm' : ''}`}>
         <label>活性</label>
         <b>{typeof v === 'number' ? (v * 100).toFixed(1) + '%' : '—'}</b>
@@ -24,8 +25,8 @@ export default function Vitals({ snap, onOpenConfig }) {
       </div>
       <div className={`cell ${w && w.pct >= 85 ? 'warn' : ''}`}>
         <label>钱包</label>
-        <b>{w ? `¥${w.remainingCny}` : '—'}</b>
-        <span className="mini">{w ? `已烧 ¥${w.burnedCny}/¥${w.allowanceCny}(${w.pct}%)` : ''}</span>
+        <b>{w ? `¥${Number(w.remainingCny).toFixed(4)}` : '—'}</b>
+        <span className="mini">{w ? `已烧 ¥${Number(w.burnedCny).toFixed(4)}/¥${Number(w.allowanceCny).toFixed(4)}(${w.pct}%)` : ''}</span>
       </div>
       <div className="cell">
         <label>疲劳</label>
@@ -42,6 +43,7 @@ export default function Vitals({ snap, onOpenConfig }) {
         <b>{snap?.queue?.pending ?? '—'}</b>
         <span className="mini">在排事件</span>
       </div>
+      <FuturesCells snap={snap} />
       <button className="gear" title="配置" onClick={onOpenConfig}>⚙</button>
     </header>
   );
