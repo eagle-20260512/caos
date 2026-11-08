@@ -1,21 +1,20 @@
 #!/usr/bin/env node
-// ca-calib.mjs — 统一校准引擎(原则:阈值内生,但内生的是机械统计器,不是 LLM 叙事)
+// ca-calib.mjs — 统一校准引擎(2026-11-08 用户裁决:「阈值内生,但内生的是机械统计器,不是 LLM 叙事」)
 // 第一刀(反叙事合规):阈值由本器从零LLM账本统计产出 JSON artifact,LLM 只许读数,不许拟合曲线。
 // 冷启动协议(先于内生,防小样本棘轮):minN=30 / 滞回(同一可动裁决连续2窗才动) / 单次步进1档 /
 //   24h滚动窗 / 类型样本不足回退全局(P1 只落全局,类型级留规格桩) / 先验=现静态值。
-// 外账姿态:先动后审——有据移动含放宽,全部落 ledgers/calib-drift.jsonl 方向账;
+// 外账姿态(用户裁):先动后审——有据移动含放宽,全部落 ledgers/calib-drift.jsonl 方向账;
 //   放宽挂 needsExternalRecon 旗公示不阻断;绕开本器手动改阈值=fp-audit DRIFT 硬断面。
 // 消费面:断头台(loop pain 门/organ PENDING_CAP)、痛觉电费(基数)、pain 轮帽、防饿死帽(loop protected)——
-// 第四件:销账对账 pain-resolution(审计非校准;pain 办结须配消费行,凭空销=污染公示)。原行:
 //   各自读 state/calib/<name>.json,读坏=回退静态先验(fail-safe=更紧更省)。
+// 第四件(2026-11-08 v1.4 适配批):销账对账 pain-resolution(审计非校准;pain 办结须配消费行,凭空销=污染公示)。
 // 节流:自评估 ≤1次/时(state/calib/.last-run);自身坏=exit0 带 error,不拦主流程。
-// 复现:node engine/ca-calib.mjs --explain <name> 打印规格/现值/证据窗/账源,外部可独立重算打叉。
+// 复现:node scripts/ca-calib.mjs --explain <name> 打印规格/现值/证据窗/账源,外部可独立重算打叉。
 import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { localDay } from './time.mjs';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
+const CA = path.resolve(HERE, '..');
 const LOOP = path.join(CA, 'ledgers', 'loop.jsonl');
 const DOPA = path.join(CA, 'ledgers', 'dopamine.jsonl');
 const CALIB_DIR = path.join(CA, 'state', 'calib');
@@ -45,7 +44,7 @@ const SPECS = {
   },
   'pain-toll-base': {
     prior: 0.10, bounds: [0.05, 0.50], step: 0.05,
-    about: '痛觉电费基数(¥):repeat 翻倍与帽¥2 暂不动(一件一动,防多变量归因打架)',
+    about: '痛觉电费基数(¥):repeat 翻倍与帽¥2 暂不动(P1 一件一动,防多变量归因打架)',
     // 指标:窗内罚单 repeat>0 占比——价不灵=同源照犯,该加价;长期无犯且落空率已低=过度威慑候选,可降
     metric: (w) => {
       const tolls = w.dopa.filter((e) => e.kind === 'pain-toll');
@@ -62,7 +61,7 @@ const SPECS = {
   },
   'starve-cap': {
     prior: 3, bounds: [1, 10], step: 1,
-    about: '防饿死保护帽:自设件被用户件抢占≥cap 次进 protected(执行中不被打断;排队序仍让位用户——用户直达永不饿不动)',
+    about: '防饿死保护帽(2026-11-08 v1.4适配批):自设件被用户件抢占≥cap 次进 protected(执行中不被打断;排队序仍让位用户——用户直达永不饿不动)',
     // 指标:窗内自设件(organ-followup/self-work/self-hunger)被抢占占比;高=用户流量压死自设,该紧(更早保护);长期零抢占=保护用不上,可松
     metric: (w) => {
       const pre = w.loop.filter((e) => e.event === 'preempted').length;
@@ -78,8 +77,8 @@ const SPECS = {
   },
   'pain-rounds': {
     prior: 4, bounds: [1, 12], step: 1,
-    about: 'pain 消化轮帽(历史实证:静态高帽下难件顶格跑满=烧量根因;env CA_LOOP_PAIN_ROUNDS 仍是硬覆盖)',
-    // 指标:窗内真消化(排除经济闸弹回的 rounds=null 件)解决率;历史基线 0.406(静态帽时代实测)
+    about: 'pain 消化轮帽(旧帽13史:ok的72/110顶格跑满=烧量根因活化石;env CA_LOOP_PAIN_ROUNDS 仍是硬覆盖)',
+    // 指标:窗内真消化(排除经济闸弹回的 rounds=null 件)解决率;历史基线 0.406(旧帽13时 110/271)
     // 崩到基线一半以下=帽太紧该松;守住基线且p90轮数远低于帽=同样收成更省,该紧
     baseline: 0.406,
     metric: (w) => {
@@ -98,7 +97,39 @@ const SPECS = {
   },
 };
 
+// forge 阈族(2026-11-08 主动性引爆重构·用户令):LLM 唤醒的绝对门——压力源实测值≥本阈才准点火。
+//   先验=现用线;指标=窗内 forge-<kind> 事件消化成功率(<0.2=点了也白点→升阈收紧;>0.8=点得动→降阈放敏)。
+//   方向:值大=紧(towardTight=+档)。minN/滞回/先动后审与值校准同律。
+const forgeSpec = (kind, prior, bounds, about) => ({
+  prior, bounds, step: Math.round(((bounds[1] - bounds[0]) / 4) * 1000) / 1000 || 1, about,
+  metric: (w) => {
+    const fired = w.loop.filter((e) => e.event === 'consumed' && e.type === `forge-${kind}` && e.rounds != null);
+    const ok = fired.filter((e) => e.ok === true).length;
+    return { n: fired.length, solveRate: fired.length ? ok / fired.length : null };
+  },
+  judge: (m) => {
+    if (m.solveRate == null) return 'hold';
+    if (m.solveRate < 0.2) return 'tighten';
+    if (m.solveRate > 0.8) return 'loosen';
+    return 'hold';
+  },
+});
+Object.assign(SPECS, {
+  'forge-hunger': forgeSpec('hunger', 60, [15, 240], '饥饿点火阈(静默分钟):静默≥此值且权重压过疲劳才准唤醒 LLM'),
+  'forge-dirty': forgeSpec('dirty', 1, [1, 10], '队列残行点火阈(条)'),
+  'forge-predOverdue': forgeSpec('predOverdue', 3, [1, 20], '过期未判预言点火阈(条)'),
+  'forge-parseFail': forgeSpec('parseFail', 0.3, [0.1, 0.9], '器官解析失败率点火阈(占比)'),
+  'forge-heartbeatStale': forgeSpec('heartbeatStale', 60, [15, 360], '心跳停摆点火阈(分钟)'),
+  'forge-dreamDebt': forgeSpec('dreamDebt', 15, [5, 60], '巩固债点火阈(未巩固事件数)'),
+  'forge-queueStuck': forgeSpec('queueStuck', 10, [3, 60], '队列积压点火阈(在排件数)'),
+  'forge-taskDebt': forgeSpec('taskDebt', 1.0, [0.25, 8], '停滞债载点火阈(债息载量)'),
+  'forge-crystalLag': forgeSpec('crystalLag', 360, [60, 1440], '结晶延迟点火阈(分钟)'),
+  'forge-futureDeath': forgeSpec('futureDeath', 120, [30, 720], '预期死期点火阈(分钟;方向反:死期<阈才开火,ca-futures 零LLM推演)'),
+  'forge-visionGap': forgeSpec('visionGap', 70, [30, 95], '愿景偏差点火阈(点;高光枯水+判据自松,ca-vision 零LLM)'),
+});
+
 const readJsonl = (f) => { try { return readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
+const localDay = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 function evaluate(name, spec, windowData) {
   const file = path.join(CALIB_DIR, `${name}.json`);
@@ -110,7 +141,7 @@ function evaluate(name, spec, windowData) {
   let moved = null;
   if (verdict !== 'hold' && streak >= HYST_WINDOWS) {
     // 方向语义:cap/轮帽类——值小=紧(tighten=减一档);电价类——值大=紧(tighten=加一档)
-    const towardTight = name === 'pain-toll-base' ? +spec.step : -spec.step;
+    const towardTight = (name === 'pain-toll-base' || name.startsWith('forge-')) ? +spec.step : -spec.step;
     const nv = Math.min(spec.bounds[1], Math.max(spec.bounds[0],
       Math.round((st.value + (verdict === 'tighten' ? towardTight : -towardTight)) * 10000) / 10000));
     if (nv !== st.value) {
@@ -131,8 +162,8 @@ function evaluate(name, spec, windowData) {
   return { name, moved, ...out };
 }
 
-// ── 销账对账(第四件,审计非校准):pain 事件被办结(cursor done)但 loop 账
-//   无 consumed/compile-fail 消费行=销账无消化=污染嫌疑(pain 减少必须配 pain-resolved)。
+// ── 销账对账(v1.4 §3.1 适配·第四件,审计非校准):pain 事件被办结(cursor done)但 loop 账
+//   无 consumed/compile-fail 消费行=销账无消化=污染嫌疑(v1.4 原义:pain 减少必须配 pain-resolved)。
 //   只审 24h 窗内出生的 pain 件;处理中(doing)豁免;compile-fail 算合法机械销账(诚实失败有账)。
 //   异常落 calib-drift(needsExternalRecon 公示)+friction 打痛;自身坏=如实返回 error 字段不毁校准。
 const FRICTION = path.join(CA, 'ledgers', 'friction.jsonl');
