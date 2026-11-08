@@ -420,6 +420,12 @@ function readCursor() {
 const atomicWrite = (p, data) => { const t = p + '.tmp-' + process.pid; writeFileSync(t, data); renameSync(t, p); };
 function writeCursor(done, doing = null) { writeFileSync(CURSOR, JSON.stringify({ v: 2, done: [...done].sort((a, b) => a - b), doing, pid: process.pid, ts: new Date().toISOString() }) + '\n'); } // pid=写者指纹(游标倒退验尸后,落笔者实名制)
 
+// ── 防饿死 protected:自设件被用户件抢占计数进 state/loop-starve.json,≥cap(calib 内生,先验3)=protected。
+//   protected 只换「执行中不被用户件打断」(用户等 ≤capMs),排队序仍在用户件之下——用户直达永不饿不动。 ──
+const STARVE = path.join(CA, 'state', 'loop-starve.json');
+const readStarve = () => { try { return JSON.parse(readFileSync(STARVE, 'utf8')); } catch { return {}; } };
+const writeStarve = (m) => { try { writeFileSync(STARVE, JSON.stringify(m) + '\n'); } catch { /* 写败下拍再来 */ } };
+
 function readEvents() {
   if (!existsSync(QUEUE)) return [];
   return readFileSync(QUEUE, 'utf8').split('\n').filter((l) => l.trim())
@@ -499,8 +505,22 @@ export async function drainOnce() {
   try {
     let events = readEvents();
     const done = readCursor();
-    // 分档:P1 用户直达=最高(经济政策「用户直达永不饿」在队列面的兑现)>pain/priority>先来后到
-    const pri = (i) => (events[i]?.type === 'user-say' ? 2 : (events[i]?.priority || events[i]?.type === 'pain' ? 1 : 0));
+    // Recovery 三重对账:每拍开头机械验 快照hash/账体连贯/LLM面;异常=降级落账照跑(绝不拒启)。
+    try {
+      const RC = path.join(HERE, 'ca-recovery.mjs');
+      if (existsSync(RC)) {
+        const r = spawnSync('node', [RC, 'verify'], { encoding: 'utf8', timeout: 10_000 });
+        let rep = null; try { rep = JSON.parse((r.stdout ?? '').trim()); } catch { rep = null; }
+        if (rep && rep.ok === false) log({ event: 'recovery-anomaly', anomalies: (rep.anomalies ?? []).map((a) => a.code).slice(0, 6) });
+      }
+    } catch { /* 对账器坏不毁循环 */ }
+    // 防饿死:已办结行的 starve 账顺手清(键=L<行号>)
+    const starve = readStarve();
+    for (const k of Object.keys(starve)) if (done.has(Number(String(k).slice(1)))) delete starve[k];
+    const starveCap = calibValue('starve-cap', 3);
+    const isProtected = (i) => (starve[`L${i}`] ?? 0) >= starveCap;
+    // 分档:P1 用户直达=最高(「用户直达永不饿」)>protected(防饿死)>pain/priority>先来后到
+    const pri = (i) => (events[i]?.type === 'user-say' ? 3 : (isProtected(i) ? 2 : (events[i]?.priority || events[i]?.type === 'pain' ? 1 : 0)));
     // 重扫制(:快照制让 pass 中途新到的 user-say 挨饿整轮)——每件消化完重读队列重排,
     // 新到用户件下一件即上;自投 followup 也在同 pass 续作(长时工作能力面)
     for (;;) {
@@ -582,7 +602,8 @@ export async function drainOnce() {
       const capMs = 120_000;
       // 用户直达盯梢(「用户直达永不饿」真兑现):本件非 user-say 时,消化中途新到用户件=SIGTERM 让位,
       // 本件不结行号(at-least-once,后续 pass 重消);用户件之间不互抢(先来后到)
-      const preemptCheck = ev.type === 'user-say' ? null : () => {
+      // 防饿死:本件已 protected(被抢 ≥cap 次)=本拍执行中不再被打断(用户等 ≤120s),换自设件必跑完一次
+      const preemptCheck = (ev.type === 'user-say' || isProtected(next)) ? null : () => {
         const evs = readEvents();
         for (let i = 0; i < evs.length; i++) if (!done.has(i) && !skipped.has(i) && evs[i]?.type === 'user-say') return true;
         return false;
@@ -599,7 +620,7 @@ export async function drainOnce() {
       const execSnap = isExec ? gateSnap() : null;
       const r = await runOrgan([ORGAN, 'run', '--dp', dp, '--source', `ledger:state/event-queue.jsonl#L${next + 1}`, '--channel', stim.channel, '--json', ...(isExec ? ['--max-rounds', String(execRounds)] : [])], { CA_ORGAN_TRACE: traceFile, CA_ORGAN_BUDGET_MS: String(capMs - 60_000), ...(organTask ? { CA_ORGAN_TASK: organTask } : {}), ...(isExec ? { CA_ORGAN_MAXTOK: '8000', CA_ORGAN_OUTBUDGET: String(Number(process.env.CA_LOOP_OUTBUDGET ?? 16000)) } : {}), ...(ev.type === 'user-say' ? { CA_ORGAN_STREAM: path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`) } : {}) }, capMs, preemptCheck);
       const wallMs = Date.now() - tW0; // 含编译+思考的全程墙钟:退场悬挂回归闸(exp-organ-linger)的仪表
-      if (r.preempted) { log({ event: 'preempted', id: eid, type: ev.type }); writeWM(eid, ev.type, 'preempted', ev.text); continue; } // 让位:重扫即上用户件
+      if (r.preempted) { starve[`L${next}`] = (starve[`L${next}`] ?? 0) + 1; writeStarve(starve); log({ event: 'preempted', id: eid, type: ev.type, starve: starve[`L${next}`], protected: isProtected(next) }); writeWM(eid, ev.type, 'preempted', ev.text); continue; } // 让位:重扫即上用户件;抢占计数进防饿死账
       let out = null;
       try { out = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { /* 非 JSON=如实记 */ }
       const ok = r.status === 0 && out && !out.throttled;
@@ -703,6 +724,7 @@ export async function drainOnce() {
       // 五环④→⑤ outcome 回流(器官时代:outcome=轮次结果回账;执行轮带 execution 证据)
       try { appendFileSync(path.join(CA, 'ledgers', 'outcomes.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: eid, type: ev.type, via: 'organ', ok, execution: (() => { try { const ol = readFileSync(ORGAN_LEDGER, 'utf8').trim().split('\n'); return !!JSON.parse(ol[ol.length - 1]).execution; } catch { return false; } })() }) + '\n'); } catch { /* 回流失败不毁循环 */ }
       done.add(next); writeCursor(done); drained++;
+      if (starve[`L${next}`]) { delete starve[`L${next}`]; writeStarve(starve); } // 办结销防饿死账(漏清也有拍首清账兜底)
     }
     reconcileDeadlines(); // 截止对账:到期未中=落空(occur)/应验(absent);cmd 型=机械断言
     stateIgnite(events.length); // 事件驱动点火面(,禁止」:节律改由状态触发)
@@ -787,7 +809,10 @@ export async function drainOnce() {
       let rep = null;
       try { rep = JSON.parse((r.stdout ?? '').trim() || '{}'); } catch { rep = null; }
       if (r.status !== 0 || rep?.error) log({ event: 'calib-error', rc: r.status, err: String(rep?.error ?? r.stderr ?? '').slice(0, 120) });
-      else for (const m of rep?.moved ?? []) log({ event: m.direction === 'loosen' ? 'calib-loosen' : 'calib-tighten', name: m.name, from: m.from, to: m.to, n: m.evidence?.n });
+      else {
+        for (const m of rep?.moved ?? []) log({ event: m.direction === 'loosen' ? 'calib-loosen' : 'calib-tighten', name: m.name, from: m.from, to: m.to, n: m.evidence?.n });
+        if (rep?.audit?.anomalyN > 0) log({ event: 'calib-audit-anomaly', kind: rep.audit.kind, n: rep.audit.anomalyN }); // 销账对账:pain 凭空销=污染公示
+      }
     } catch { /* 校准器坏不毁循环 */ }
     // 外部修正账/反馈泵:身体被非CA修正保持痛觉;10min 自节流,坏只记红;
     // 自埋雷修复类(mine-repair)转痛公示,功能增建只落账(防痛觉稀释)。
@@ -806,6 +831,8 @@ export async function drainOnce() {
       if (r.status !== 0 || rep?.error) log({ event: 'feedback-correlate-error', rc: r.status, err: String(rep?.error ?? r.stderr ?? '').slice(0, 120) });
       else for (const f of rep?.freshFlags ?? []) log({ event: 'praise-loosen-flag', pair: f });
     } catch { /* 联查坏不毁循环 */ }
+    // Recovery 快照:每拍收口=瞬态件的天然关机点——宪法侧快照+sha256 落审计账,下拍开头 verify 认它。
+    try { const RC = path.join(HERE, 'ca-recovery.mjs'); if (existsSync(RC)) spawnSync('node', [RC, 'snapshot'], { encoding: 'utf8', timeout: 10_000 }); } catch { /* 快照坏不毁循环 */ }
     return { drained, locked: false };
   } finally { releaseLock(); }
 }

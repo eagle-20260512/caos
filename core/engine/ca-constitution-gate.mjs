@@ -24,6 +24,7 @@ export const CONSTITUTION = new Set([
   'ca-criterion-drift.mjs', 'ca-pred-audit.mjs', 'ca-feedback-class.mjs', 'ca-external-correction.mjs', // 四大审计器
   'ca-constitution-gate.mjs', // 本件(锁本身)
   'write-jsonl-atomic.mjs', // 账本原子写
+  'ca-recovery.mjs', 'ca-archiver.mjs', // 恢复对账+归档熔断(宪法名单扩容)
 ]);
 export const isConstitution = (absOrRel) => CONSTITUTION.has(path.basename(String(absOrRel)));
 

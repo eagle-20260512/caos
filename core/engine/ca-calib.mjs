@@ -5,7 +5,8 @@
 //   24h滚动窗 / 类型样本不足回退全局(P1 只落全局,类型级留规格桩) / 先验=现静态值。
 // 外账姿态:先动后审——有据移动含放宽,全部落 ledgers/calib-drift.jsonl 方向账;
 //   放宽挂 needsExternalRecon 旗公示不阻断;绕开本器手动改阈值=fp-audit DRIFT 硬断面。
-// 消费面:断头台(loop pain 门/organ PENDING_CAP)、痛觉电费(基数)、pain 轮帽——
+// 消费面:断头台(loop pain 门/organ PENDING_CAP)、痛觉电费(基数)、pain 轮帽、防饿死帽(loop protected)——
+// 第四件:销账对账 pain-resolution(审计非校准;pain 办结须配消费行,凭空销=污染公示)。原行:
 //   各自读 state/calib/<name>.json,读坏=回退静态先验(fail-safe=更紧更省)。
 // 节流:自评估 ≤1次/时(state/calib/.last-run);自身坏=exit0 带 error,不拦主流程。
 // 复现:node engine/ca-calib.mjs --explain <name> 打印规格/现值/证据窗/账源,外部可独立重算打叉。
@@ -56,6 +57,22 @@ const SPECS = {
       if (m.repeatRate == null) return 'hold';
       if (m.repeatRate > 0.5) return 'tighten';
       if (m.repeatRate < 0.1 && (m.missRate ?? 1) < 0.4) return 'loosen';
+      return 'hold';
+    },
+  },
+  'starve-cap': {
+    prior: 3, bounds: [1, 10], step: 1,
+    about: '防饿死保护帽:自设件被用户件抢占≥cap 次进 protected(执行中不被打断;排队序仍让位用户——用户直达永不饿不动)',
+    // 指标:窗内自设件(organ-followup/self-work/self-hunger)被抢占占比;高=用户流量压死自设,该紧(更早保护);长期零抢占=保护用不上,可松
+    metric: (w) => {
+      const pre = w.loop.filter((e) => e.event === 'preempted').length;
+      const fin = w.loop.filter((e) => e.event === 'consumed' && ['organ-followup', 'self-work', 'self-hunger'].includes(e.type)).length;
+      return { n: pre + fin, preemptRate: pre + fin ? pre / (pre + fin) : null };
+    },
+    judge: (m) => {
+      if (m.preemptRate == null) return 'hold';
+      if (m.preemptRate > 0.5) return 'tighten';
+      if (m.preemptRate < 0.1) return 'loosen';
       return 'hold';
     },
   },
@@ -114,6 +131,35 @@ function evaluate(name, spec, windowData) {
   return { name, moved, ...out };
 }
 
+// ── 销账对账(第四件,审计非校准):pain 事件被办结(cursor done)但 loop 账
+//   无 consumed/compile-fail 消费行=销账无消化=污染嫌疑(pain 减少必须配 pain-resolved)。
+//   只审 24h 窗内出生的 pain 件;处理中(doing)豁免;compile-fail 算合法机械销账(诚实失败有账)。
+//   异常落 calib-drift(needsExternalRecon 公示)+friction 打痛;自身坏=如实返回 error 字段不毁校准。
+const FRICTION = path.join(CA, 'ledgers', 'friction.jsonl');
+const QUEUE = path.join(CA, 'state', 'event-queue.jsonl');
+const CURSORF = path.join(CA, 'state', 'loop-cursor.json');
+function auditPainResolution(cutoff) {
+  const cursor = (() => { try { return JSON.parse(readFileSync(CURSORF, 'utf8')); } catch { return {}; } })();
+  const done = new Set(cursor.done ?? []);
+  const doing = String(cursor.doing ?? '');
+  const qLines = readJsonl(QUEUE);
+  const loopAll = readJsonl(LOOP);
+  const consumedIds = new Set(loopAll.filter((e) => e.event === 'consumed' || e.event === 'compile-fail').map((e) => String(e.id ?? '')));
+  const anomalies = [];
+  let painsDone = 0;
+  for (let i = 0; i < qLines.length; i++) {
+    const ev = qLines[i];
+    if (ev?.type !== 'pain' || !done.has(i)) continue;
+    const ts = Date.parse(ev.ts ?? '');
+    if (Number.isFinite(ts) && ts < cutoff) continue;
+    const eid = String(ev.id ?? `line-${i}`);
+    if (eid === doing) continue;
+    painsDone++;
+    if (!consumedIds.has(eid)) anomalies.push({ line: i + 1, id: eid });
+  }
+  return { kind: 'pain-resolution', windowH: WINDOW_H, painsDone, anomalyN: anomalies.length, anomalies: anomalies.slice(0, 10) };
+}
+
 function explain(name) {
   const spec = SPECS[name];
   if (!spec) return { error: `未知校准件:${name};在册:${Object.keys(SPECS).join(', ')}` };
@@ -141,6 +187,15 @@ try {
   const inWin = (e) => { const t = Date.parse(e.ts ?? ''); return Number.isFinite(t) && t >= cutoff; };
   const windowData = { loop: readJsonl(LOOP).filter(inWin), dopa: readJsonl(DOPA).filter(inWin) };
   const results = Object.entries(SPECS).map(([n, s]) => evaluate(n, s, windowData));
+  // 销账对账(与值校准同拍,1h 同节流)
+  let audit = null;
+  try {
+    audit = auditPainResolution(cutoff);
+    if (audit.anomalyN > 0) {
+      appendFileSync(DRIFT, JSON.stringify({ ts: new Date().toISOString(), kind: 'calib-audit', ...audit, needsExternalRecon: true }) + '\n');
+      appendFileSync(FRICTION, JSON.stringify({ ts: new Date().toISOString(), kind: 'pain-vanish-no-resolution', surface: 'ca-calib', detail: `销账无消化:${audit.anomalyN} 笔 pain 已办结但 loop 账无消费行(${audit.anomalies.map((a) => a.id).join(',').slice(0, 120)})`, evidence: 'ledger:ledgers/calib-drift.jsonl#pain-resolution', verified: true }) + '\n');
+    }
+  } catch (e) { audit = { kind: 'pain-resolution', error: String(e?.message ?? e).slice(0, 120) }; }
   const lt = `${LASTRUN}.tmp-${process.pid}`;
   writeFileSync(lt, JSON.stringify({ ts: new Date().toISOString() }) + '\n');
   renameSync(lt, LASTRUN);
@@ -149,6 +204,7 @@ try {
     held: results.filter((r) => !r.moved).map((r) => `${r.name}=${r.value}(n=${r.n}${r.n < MIN_N ? ',冷启动' : ''})`),
     moved: results.filter((r) => r.moved).map((r) => r.moved),
     loosen: results.filter((r) => r.moved?.needsExternalRecon).map((r) => r.name),
+    audit: audit ? { kind: audit.kind, painsDone: audit.painsDone ?? null, anomalyN: audit.anomalyN ?? null, error: audit.error ?? null } : null,
   }));
 } catch (e) {
   console.log(JSON.stringify({ error: String(e?.message ?? e).slice(0, 200), moved: [], loosen: [] }));

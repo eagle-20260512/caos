@@ -93,7 +93,10 @@ export function walletToday(now = new Date()) {
   return {
     date: today, allowanceCny: allowance, burnedCny: burnedPrivate,
     remainingCny: Math.round((allowance - burnedPrivate) * 10000) / 10000,
-    pct: Math.round((1000 * burnedPrivate) / allowance) / 10,
+    // 经济痛溢出钳制:余额为负(烧穿)pct 直接封顶 100%——地板额度下 pct 会爆出五位百分数
+    //   污染 econPain 读数;rawPct 留真供对账,闸门语义不变(pct≥100=烧穿)
+    pct: Math.min(100, Math.round((1000 * burnedPrivate) / allowance) / 10),
+    rawPct: Math.round((1000 * burnedPrivate) / allowance) / 10,
     scope: 'private(闸门/活性/额度皆私账口径)',
     public: { burnedCny: burnedPublic, note: '用户任务烧量,走用户母账,不扣私账、不设闸' },
     total: { burnedCny: burned },
