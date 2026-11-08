@@ -79,6 +79,12 @@ export function check(text, source = 'report-check') {
     const pat = p?.check?.pattern;
     if (pat !== undefined && isVague(pat)) errors.push(`predictions[${i}] check.pattern 空泛:${JSON.stringify(pat)}`);
     if (!pat && !p?.check?.cmd) errors.push(`predictions[${i}] 既无 pattern 也无 cmd`);
+    // 自修(落空复盘):shell 断言塞进 pattern 字段,对账器拿它去匹配事件文本 → 永远匹配不到 → 误判落空。
+    //   shell 断言必须走 cmd 型。
+    if (pat && typeof pat === 'string' && !p?.check?.cmd
+        && /(\$\(|test\s+-|node\s+(?:scripts|engine)\/|grep\s+|exit\s*\$?\?)/.test(pat)) {
+      errors.push(`predictions[${i}] check.pattern 里塞了 shell 断言,对账器会拿它匹配事件文本而永远不中:改用 check.cmd`);
+    }
   });
   // 结构缺件但 organ 未拒的部分(organ 只查 about/expect/check,报告面还要这些)
   for (const k of ['deviation']) if (!(k in report)) warnings.push(`缺 ${k}`);
@@ -94,6 +100,7 @@ const CASES = [
   { name: '负例:缺 bind', want: 1, text: '```json\n{"deviation":"x","predictions":[{"about":"a","expect":"b","check":{"pattern":"第[0-9]+行"}}]}\n```' },
   { name: '负例:check 全缺', want: 1, text: '```json\n{"deviation":"x","predictions":[{"about":"a","expect":"b","bind":{"action":"改脚本"},"check":{}}]}\n```' },
   { name: '负例:pattern 空泛 .*', want: 1, text: '```json\n{"deviation":"x","predictions":[{"about":"a","expect":"b","bind":{"action":"改脚本"},"check":{"pattern":".*"}}]}\n```' },
+  { name: '负例:pattern 塞 shell 断言', want: 1, text: '```json\n{"deviation":"x","predictions":[{"about":"a","expect":"b","bind":{"action":"改脚本"},"check":{"pattern":"test -n \\"$(node engine/x.mjs | grep -q y)\\""}}]}\n```' },
   { name: '负例:无 json 块', want: 2, text: '本轮我没写报告。' },
 ];
 

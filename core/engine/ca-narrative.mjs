@@ -73,7 +73,10 @@ const rewriteNode = (t, id, patch) => {
 };
 const nextId = (t) => {
   const day = localIso().slice(0, 10);
-  const seq = readNodes(t).filter((n) => String(n.id).startsWith(`${t}:${day}-`)).length + 1;
+  // 取当日已用最大号 +1(禁 count+1:删行后 count 前移会撞号)
+  const seqs = readNodes(t).filter((n) => String(n.id).startsWith(`${t}:${day}-`))
+    .map((n) => parseInt(String(n.id).slice(`${t}:${day}-`.length), 10)).filter((v) => Number.isFinite(v));
+  const seq = (seqs.length ? Math.max(...seqs) : 0) + 1;
   return `${t}:${day}-${String(seq).padStart(3, '0')}`;
 };
 const parseDue = (raw) => {

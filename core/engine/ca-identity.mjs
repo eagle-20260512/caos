@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ca-identity.mjs — DID 身份底座(2026-11-07 用户令「唯一 ID + 通信接口,像区块链」)
+// ca-identity.mjs — DID 身份底座(唯一 ID + 通信接口,像区块链)
 // 令原文:首启用 Node crypto 生成 Ed25519 密钥对;公钥哈希=CA_ID 写入 config/identity.md;
 //         私钥加密保存本地,不离开宿主机;A2A 消息包={sender_id,receiver_id,signature,payload};
 //         隐私脱敏:禁原始日志,只有编译器提炼的经验结晶(Knowledge Card)可进 payload。

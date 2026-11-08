@@ -16,6 +16,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createTask, dueTasks, touchTask, taskOfPred } from './ca-task.mjs'; // 任务实体(零LLM机械账,CLI 有 IS_MAIN 闸不抢跑);清算协议:dueTasks/touchTask/taskOfPred
+import { painToll } from './ca-pain-toll.mjs'; // 痛觉不应期:miss=负反馈,电费照收,重复/高空落翻倍
+import { classifyFeedback } from './ca-feedback-class.mjs'; // 反馈可消化性:纯机械<1ms 内联,宁挂起不错放
+import { snapshotMjs as gateSnap, diffSnapshots as gateDiff } from './ca-constitution-gate.mjs'; // evidence 核验制差分引擎(宪法侧:organ 申报,loop 核验,被审者不自证)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
@@ -31,6 +34,9 @@ const FRICTION = path.join(CA, 'ledgers', 'friction.jsonl');
 const ORGAN_LEDGER = path.join(CA, 'ledgers', 'organ.jsonl'); // 说而不作机械账的账源(原缺定义,ReferenceError 被 try/catch 静默吞=该核验从未生效)
 const INNER_VOICE = path.join(CA, 'ledgers', 'inner-voice.jsonl'); // 内语账(自主预测链批·焊点A):非用户件的器官研判正文落账处
 const SKIP_LEDGER = path.join(CA, 'ledgers', 'skipped.jsonl'); // 跳过账:每次阀关跳过必须留一行,禁静默 continue(落地)
+const FB_LEDGER = path.join(CA, 'ledgers', 'feedback-class.jsonl'); // 反馈分类账:sidecar 按事件 id 挂签,append-only
+const FB_PENDING = path.join(CA, 'state', 'feedback-pending.jsonl'); // 待翻译 backlog(销账原则:入账标不参与判据,但有形化防淤积)
+const classifiedOnce = new Set(); // 进程内同件只记一次(重扫/让位重试不重复落账;跨进程重复由 eid 可稽)
 
 // 一件一账(定义须先于一切模块级使用点——housekeep 自验块在模块加载期执行,TDZ 会在空账首跑时炸崩)
 const log = (obj) => { try { mkdirSync(path.dirname(LEDGER), { recursive: true }); appendFileSync(LEDGER, JSON.stringify({ ts: new Date().toISOString(), ...obj }) + '\n'); } catch { /* 账不可写不毁循环 */ } };
@@ -45,6 +51,12 @@ function writeReply(eid, obj) {
 }
 
 const localIso = () => { const d = new Date(); const o = -d.getTimezoneOffset(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}${o >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(o) / 60)).padStart(2, '0')}:${String(Math.abs(o) % 60).padStart(2, '0')}`; };
+
+// 内生校准读数:阈值由 ca-calib(零LLM 机械统计器)产出,
+// 消费面只读 state/calib/<name>.json;读坏=回退静态先验(fail-safe 方向=更紧更省)。
+const calibValue = (name, fallback) => {
+  try { const v = Number(JSON.parse(readFileSync(path.join(CA, 'state', 'calib', `${name}.json`), 'utf8')).value); return Number.isFinite(v) ? v : fallback; } catch { return fallback; }
+};
 
 // ── 亲历对账器(,机械零LLM:预测偏差=点火器,咬合点=friction 账本) ──
 // 在案未验预测(state=open,append-only 账:同 id 后行盖前行)对每件新事件/每次兜清做机械验证:
@@ -86,9 +98,26 @@ function verdictPrediction(p, state, by) {
   try {
     appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'prediction-miss', surface: 'prediction-igniter', detail: `预测落空:${p.about} | 预期:${p.expect} | 模式:${p.check.pattern ?? p.check.cmd ?? '?'}`, evidence: `ledger:ledgers/predictions.jsonl#${p.id}`, verified: true }) + '\n');
   } catch { /* 痛觉落账失败不毁循环 */ }
-  const pev = { id: `ev-pain-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, type: 'pain', priority: true, pred: p.id, text: `预测落空点火:${p.about}——预期「${String(p.expect).slice(0, 120)}」未兑现(模式 ${p.check.pattern ?? p.check.cmd ?? '?'},触发 ${by})。研判:预期错在哪,要不要校准基线;pain_ref=${p.id}`, closure: { closed: false, mustAction: String(p.bind?.action ?? ''), // 闭环缺口:落空必须绑一个我能自己做的动作,空=未闭环
-    needRepair: !p.bind?.action }, ts: new Date().toISOString() };
-  appendFileSync(QUEUE, JSON.stringify(pev) + '\n');
+  // 痛觉不应期:miss=负反馈,电费照收;同 pred 反复 miss/当日落空率>50%=翻倍。
+  // 收费在投件之前:痛觉从「免费点火」变「付费点火」,瞎预言的燃料在物理上断供。
+  const toll = painToll({ predId: p.id, about: p.about, why: 'prediction-miss' });
+  // 断头台:pain 回火门与 organ-followup 同闸:未消化 pain≥cap=禁投新痛(账照落,刺激断供);
+  // 读数坏=fail-closed 也断(烧钱侧不许借故障放大)。痛觉账(friction)永不缺,断的是 LLM 消费引线。
+  try {
+    const doneSet = new Set(JSON.parse(readFileSync(CURSOR, 'utf8')).done ?? []);
+    const qLines = readFileSync(QUEUE, 'utf8').split('\n');
+    let pend = 0;
+    for (let i = 0; i < qLines.length; i++) {
+      if (!qLines[i].trim() || doneSet.has(i)) continue;
+      try { if (JSON.parse(qLines[i])?.type === 'pain') pend++; } catch { /* 脏行不计 */ }
+    }
+    if (pend >= calibValue('guillotine-cap', 3)) { log({ event: 'pain-fused', pred: p.id, pending: pend, cap: calibValue('guillotine-cap', 3), tollCny: toll.toll ? -toll.toll : 0 }); }
+    else {
+      const pev = { id: `ev-pain-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, type: 'pain', priority: true, pred: p.id, text: `预测落空点火:${p.about}——预期「${String(p.expect).slice(0, 120)}」未兑现(模式 ${p.check.pattern ?? p.check.cmd ?? '?'},触发 ${by})。研判:预期错在哪,要不要校准基线;pain_ref=${p.id}`, closure: { closed: false, mustAction: String(p.bind?.action ?? ''), // 闭环缺口:落空必须绑一个我能自己做的动作,空=未闭环
+        needRepair: !p.bind?.action }, ts: new Date().toISOString() };
+      appendFileSync(QUEUE, JSON.stringify(pev) + '\n');
+    }
+  } catch (e) { log({ event: 'pain-fused', pred: p.id, pending: 'cursor-read-fail', why: String(e?.message ?? e).slice(0, 60), tollCny: toll.toll ? -toll.toll : 0 }); }
   // 预测咬人:落空带 bind.action=落成跨事件任务实体——痛是一过性的,任务不到 done 不散
   if (p.bind?.action) {
     try {
@@ -115,13 +144,30 @@ function hitIsSelfStat(text, pattern) {
 function noOutputReason(out, wallMs) {
   if (!out) return { code: 'organ-crash', human: '器官进程崩溃/超时或输出不可解析' }; // stdout 非 JSON:die/hardRace/被杀 都走这
   if (out.error) return { code: 'organ-error', human: `器官报错:${String(out.error).slice(0, 80)}` };
-  // 焊点C(CA 自诊补丁 2026-11-07,CC 代合并):跑到一半被墙钟掐断 vs 跑满自然停——同是「跑了 N 轮无答案」,
-  //   死因不同(超时要加 wallMs 预算,自然停要查 prompt)。字段修正:器官自计时是 ms(原补丁写的 elapsedMs 不存在,已按实改)
+  // 跑到一半被墙钟掐断 vs 跑满自然停——同是「跑了 N 轮无答案」,死因不同(超时要加 wallMs 预算,自然停要查 prompt)
   if (wallMs && out.rounds > 0 && Number(out.ms) >= wallMs * 0.95) {
     return { code: 'organ-walltime', human: `器官跑到墙钟上限(${Math.round(Number(out.ms))}ms/${wallMs}ms)被掐断,${out.rounds} 轮无答案` };
   }
   if (!out.rounds) return { code: 'organ-no-round', human: '器官未起步即退场' };
   return { code: 'organ-empty', human: `器官跑了 ${out.rounds} 轮但无答案产出` };
+}
+
+// 死因结构化:organ-no-answer 只有自由文本 stderr 尾部时,聚合要人读=账上看得见、机械看不见。
+// rootCause 取有限枚举(可 group by),detail/cause 保留原文不裁——枚举给机械,原文给未来的人。
+export function rootCauseOf(nr, stderrTail, wallMs) {
+  const s = String(stderrTail ?? '').toLowerCase();
+  const code = String(nr?.code ?? 'unknown');
+  if (/api[_ -]?key|missing key|no key|key 未注入|apikey/.test(s)) return 'missing-key';
+  if (/\b401\b|\b403\b|unauthorized|invalid.*(token|key)|forbidden/.test(s)) return 'auth-rejected';
+  if (/enotfound|econnrefused|econnreset|fetch failed|socket hang up|network/.test(s)) return 'network';
+  if (/timeout|timed out|etimedout|超时/.test(s)) return 'timeout';
+  if (/unexpected token|json\s*parse|unparsable/.test(s)) return 'unparsable-output';
+  // node 装载/引用期真实串:器官死在模块装载时,stderr 尾部可能只剩 'racePromise.__proto__ (node:internal/modules/...)'
+  if (/err_module_not_found|cannot find module|cannot find package|unknown file extension|failed to resolve|internal\/modules\/|esm\/loader/.test(s)) return 'loader-module';
+  if (/referenceerror|cannot read propert|is not defined|is not a function|before initialization|not a constructor|__proto__|of undefined|of null/.test(s)) return 'loader-reference';
+  // 无文本证据时用墙钟说话:接近/超过上限=timeout(推断,detail 原文不裁)
+  if (Number.isFinite(wallMs) && wallMs >= 35_000) return 'timeout';
+  return code;
 }
 
 function reconcileEvent(ev, eid, evSource) {
@@ -145,9 +191,15 @@ function reconcileDeadlines() {
     if (!Number.isFinite(by) || now <= by) continue;
     // check.cmd 型=机械 shell 断言(队列外现实的眼睛;exit0=预期成立;10s 帽, 身份天然边界)
     if (p.check?.cmd) {
+      // 落空归因三要素:①耗时 ②超时/信号显式标注 ③stderr 尾 200 字 —— 让每条 cmd 型落空
+      // 可当场判「代码坏了」还是「执行器环境不同」(只留 exit 码时复现不出失败就无法归因)。
+      const t0 = Date.now();
       const r = spawnSync('/bin/bash', ['-c', String(p.check.cmd)], { encoding: 'utf8', timeout: 10_000 });
       const held = r.status === 0;
-      verdictPrediction(p, held === (p.check.mode !== 'absent') ? 'hit' : 'miss', `cmd:${String(p.check.cmd).slice(0, 60)}→exit${r.status}`);
+      const why = r.signal ? `sig${r.signal}` : (r.status === null ? 'timeout10s' : `exit${r.status}`);
+      const errTail = String(r.stderr || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      verdictPrediction(p, held === (p.check.mode !== 'absent') ? 'hit' : 'miss',
+        `cmd:${String(p.check.cmd).slice(0, 60)}→${why}|ms=${Date.now() - t0}${errTail ? `|stderr:${errTail}` : ''}`);
       continue;
     }
     verdictPrediction(p, p.check.mode === 'absent' ? 'hit' : 'miss', `deadline:${p.check.by}`);
@@ -170,7 +222,49 @@ function stateIgnite(queueLen) {
   st.dreamCount = sinceDream;
   // 新日→遗忘压缩+指标(机械零LLM,直接内联跑)
   if (st.housekeep !== today) fire('housekeep', () => { spawnSync('node', [path.join(HERE, 'ca-compress.mjs')], { timeout: 30_000 }); spawnSync('node', [path.join(HERE, 'ca-metrics.mjs')], { timeout: 30_000 }); log({ event: 'ignite', what: 'housekeep' }); });
+  // 周期自检:自我改码的器官必须自带体检,回归不靠记忆
+  selftestTick(st);
   writeFileSync(IGNITE, JSON.stringify(st) + '\n');
+}
+
+// ── 周期自检面:死因枚举 selftest 挂进循环 ──
+// 为什么:改码把自己弄死过、靠人工补跑才发现;自测若不周期跑,等于没有。
+// 触发=状态计数(每 SELFTEST_EVERY 拍一拍),零时刻表;
+// 结果落 logs/cause-selftest.jsonl(kind=loop-tick),红=同时置 st.selftestRed 供主循环自见。
+// 自检器为可选组件:未随引擎安装则如实不跑(不置红不刷账)。
+const SELFTEST_EVERY = 25;
+export function selftestTick(st) {
+  const SELFTEST = path.join(HERE, 'ca-cause-selftest.mjs');
+  if (!existsSync(SELFTEST)) return;
+  st.selftestTicks = (Number.isFinite(st.selftestTicks) ? st.selftestTicks : 0) + 1;
+  if (st.selftestTicks < SELFTEST_EVERY) return;
+  st.selftestTicks = 0;
+  try {
+    const r = spawnSync('node', [SELFTEST, '--json'], { encoding: 'utf8', timeout: 30_000, cwd: CA });
+    let allCasesOk = null, ledger = null, tailWiring = null;
+    try {
+      const j = JSON.parse(String(r.stdout || ''));
+      allCasesOk = j.allCasesOk === true; ledger = j.ledger ?? null;
+      tailWiring = Array.isArray(j.tailWiring) ? j.tailWiring : null;
+    } catch { /* 非 JSON=判红 */ }
+    // 焊点 tailWiring 长期观测:errtail 调用点判据是命中还是未命中,每 tick 落账 ——
+    // 它不自证,只能靠日志序列看它有没有被后来的改动悄悄弄丢(丢了=判据失效却没人喊)。
+    const tail = tailWiring && tailWiring.length
+      ? tailWiring.map(w => ({ hit: w.posOk === true && w.negOk === true, posOk: w.posOk === true, negOk: w.negOk === true, callSite: String(w.callSite ?? '').slice(0, 80) }))
+      : null;
+    if (!tail) st.tailWiringMissing = new Date().toISOString(); else delete st.tailWiringMissing;
+    const okRun = r.status === 0 && allCasesOk === true && (!tail || tail.every(t => t.hit));
+    appendFileSync(path.join(CA, 'logs', 'cause-selftest.jsonl'), JSON.stringify({
+      ts: new Date().toISOString(), kind: 'loop-tick', ok: okRun, exit: r.status, sig: r.signal ?? null,
+      allCasesOk, ledger, tail, tailWiringMissing: !tail,
+      errTail: String(r.stderr || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+    }) + '\n');
+    if (okRun) delete st.selftestRed; else st.selftestRed = new Date().toISOString();
+    log({ event: 'selftest-tick', ok: okRun, allCasesOk, ledgerWithCause: ledger ? `${ledger.withCause}/${ledger.total}` : null,
+      tailHit: tail ? tail.every(t => t.hit) : null, tailWiringMissing: !tail });
+  } catch (e) { // 自检自身坏不得毁循环,但留痕
+    log({ event: 'selftest-tick-fail', err: String((e && e.message) || e).slice(0, 200) });
+  }
 }
 
 // 写后自验(:物理拦截兜底 housekeep 静默半失败):标记今日已跑但 metrics 无今日行=写失败,清标记下轮重试
@@ -221,6 +315,9 @@ function sweepDueTasks() {
     if (r.status === 0) {
       touchTask(t.id, { state: 'done', evidence: `机械销账:checkCmd 成立 @${localIso()}` });
       log({ event: 'task-auto-done', task: t.id });
+      // 工资提名:任务经 check.cmd 机械验收=提名 E3 工资候选;
+      // 验证(复跑判据+账实核对)/发放(注资进私账)/防刷(一务终身一次)全在 ca-dopamine,本处只提名
+      try { appendFileSync(path.join(CA, 'ledgers', 'dopamine-candidates.jsonl'), JSON.stringify({ ts: localIso(), kind: 'E3-task-settled', task: t.id, why: `工资提名:${String(t.goal ?? '').slice(0, 100)}`, source: 'sweepDueTasks' }) + '\n'); } catch { /* 提名败不毁销账 */ }
     }
   }
   for (const t of dueTasks()) {
@@ -258,7 +355,27 @@ const releaseLock = () => { try { if (Number(readFileSync(LOCK, 'utf8')) === pro
 // ── 事件 → 刺激文本(类型即通道;编译器通道信任表定指令/数据面) ──
 function stimulusOf(ev) {
   switch (ev.type) {
-    case 'user-say': return { text: String(ev.text ?? ''), channel: 'user' };
+    case 'user-say': {
+      // 反馈可消化性分类(「消化不能非拒绝」+「宁挂起不错放」):
+      // 纯机械<1ms 内联不拖主循环;可消化直接驱动,待翻译入 backlog 有形化+追问模板把翻译成本送回源头,
+      // 正向未证挂签防 LLM 行为面软化(经济结构已使其不可兑换,此签补行为面)。
+      const raw = String(ev.text ?? '');
+      const fb = classifyFeedback(raw);
+      try {
+        if (!classifiedOnce.has(ev.id)) {
+          classifiedOnce.add(ev.id);
+          appendFileSync(FB_LEDGER, JSON.stringify({ ts: new Date().toISOString(), eid: ev.id, tag: fb.tag, digestibleN: fb.digestibleN, totalN: fb.totalN, fragments: fb.fragments.map((f) => ({ t: f.tag, hits: f.hits })) }) + '\n');
+          for (const f of fb.fragments.filter((x) => x.tag === 'indigestible')) appendFileSync(FB_PENDING, JSON.stringify({ ts: new Date().toISOString(), eid: ev.id, fragment: f.text }) + '\n');
+        }
+      } catch { /* 分类落账坏不毁消化 */ }
+      const FB_TAG = {
+        digestible: '〔机械分类·可消化反馈:已定位到判据/文件/行号/方向,直接驱动闭环〕',
+        mixed: '〔机械分类·混合反馈:可消化碎片直接驱动;待翻译碎片只记账不驱动,追问定位〕',
+        indigestible: '〔机械分类·待翻译——消化不能,非拒绝:本条未定位到判据/文件/行号/修正方向,不驱动行为,只记账。请追问定位(你是指哪个文件/哪条判据/哪一行/想让我改成什么?)——翻译成本在源头,不淤积在我这里〕',
+        'positive-unverified': '〔机械分类·正向反馈未证:只释放焦虑,不可兑换——不得据此放宽任何判据/阈值/置信度,不得把预测对象挪向「用户会满意的话」;发现自己想放水=长歪,自投 pain〕',
+      };
+      return { text: `${FB_TAG[fb.tag] ?? FB_TAG.indigestible}\n${raw}`, channel: 'user' };
+    }
     case 'promise-due': return { text: `承诺到期在案:${String(ev.text ?? '')}——核查履约/展期/如实违约,三选一不许拖`, channel: 'timer' };
     case 'tension-alert': return { text: `张力告警:${String(ev.text ?? '')}——研判根因与最小处置`, channel: 'timer' };
     case 'patrol-tension': return { text: String(ev.text ?? ''), channel: 'timer' }; // 巡逻张力(:巡逻=事件源,思考全量编译走器官)
@@ -301,7 +418,7 @@ function readCursor() {
   } catch { return new Set(); }
 }
 const atomicWrite = (p, data) => { const t = p + '.tmp-' + process.pid; writeFileSync(t, data); renameSync(t, p); };
-function writeCursor(done, doing = null) { writeFileSync(CURSOR, JSON.stringify({ v: 2, done: [...done].sort((a, b) => a - b), doing, pid: process.pid, ts: new Date().toISOString() }) + '\n'); } // pid=写者指纹(2026-11-07 验尸:游标 done 倒退案,落笔者实名制)
+function writeCursor(done, doing = null) { writeFileSync(CURSOR, JSON.stringify({ v: 2, done: [...done].sort((a, b) => a - b), doing, pid: process.pid, ts: new Date().toISOString() }) + '\n'); } // pid=写者指纹(游标倒退验尸后,落笔者实名制)
 
 function readEvents() {
   if (!existsSync(QUEUE)) return [];
@@ -309,10 +426,31 @@ function readEvents() {
     .map((l) => { try { return JSON.parse(l); } catch { return null; } });
 }
 
+// ── 钱闸身体自洽前置 ──
+// 判据:一次起循环只验一次;断言脚本非 0 退出(钱闸分支被挪到读阀之后/被读阀污染/丢 stage 留痕)
+// → 身体不自洽,本 pass 拒绝消费任何事件(事件留队,at-least-once 不丢),并落一条 body-inconsistent 账。
+// 与 ca-throttle 的钱闸(fail-closed 短路)分工:那道闸管「钱」,这道闸管「钱闸代码本身还是不是前置的」。
+// 断言锚语义(stage:'money-first' + 行为面矩阵 + 沙箱化烧穿注入),不锚代码字形——字形锚会被同列例外修法撑爆。
+// 断言件为可选组件:未随引擎安装则放行(落账 assert-missing-skip)。
+let _moneyFirstOK = null;
+function moneyFirstGate() {
+  if (_moneyFirstOK !== null) return _moneyFirstOK;
+  const assertFile = path.join(HERE, 'ca-money-gate-assert.mjs');
+  if (!existsSync(assertFile)) { _moneyFirstOK = true; log({ event: 'money-first-gate', ok: null, why: 'assert-missing-skip' }); return true; }
+  const r = spawnSync('node', [assertFile], { encoding: 'utf8', timeout: 10_000 });
+  _moneyFirstOK = r.status === 0;
+  log({ event: 'money-first-gate', ok: _moneyFirstOK, out: String(r.stdout || r.stderr || '').trim().slice(0, 300) });
+  return _moneyFirstOK;
+}
+
 function compileDp(stim, source, channel) {
+  if (!moneyFirstGate()) return { err: 'body-inconsistent: money-first-assert FAIL — 钱闸不再是判定链最前,本 pass 拒绝消费(事件留队)' };
   const pkgFile = path.join(os.tmpdir(), `ca-loop-pkg-${process.pid}.txt`);
-  const r = spawnSync('node', [COMPILER, 'compile', '--stimulus', stim, '--source', source, '--channel', channel, '--out', pkgFile], { encoding: 'utf8', timeout: 60_000 });
-  if (r.status !== 0) return { err: String(r.stderr || '编译失败').slice(0, 200) };
+  // 容器 CPU 节流下编译重尾可远超裸跑(实测同码 cgroup 内 24~>60s vs 裸跑 1s),60s 闸会误杀真编译;
+  // 240s 对齐 organ 超时量级,真挂死仍有时顶。
+  const r = spawnSync('node', [COMPILER, 'compile', '--stimulus', stim, '--source', source, '--channel', channel, '--out', pkgFile], { encoding: 'utf8', timeout: 240_000 });
+  // 死因不盲猜:静默非零退出必须带 status/signal/err 三要素
+  if (r.status !== 0) return { err: String(r.stderr || `编译失败(status=${r.status} signal=${r.signal ?? '-'} err=${r.error?.code ?? r.error?.message ?? '-'})`).slice(0, 200) };
   const dp = readFileSync(pkgFile, 'utf8');
   spawnSync('rm', ['-f', pkgFile]);
   return { dp };
@@ -421,7 +559,20 @@ export async function drainOnce() {
       }
       const stim = stimulusOf(ev);
       const { dp, err } = compileDp(stim.text, `ledger:state/event-queue.jsonl#L${next + 1}`, stim.channel);
-      if (err) { log({ event: 'compile-fail', id: eid, err }); reconcileEvent(ev, eid, `ledger:state/event-queue.jsonl#L${next + 1}`); writeWM(eid, ev.type, 'compile-fail', ev.text); done.add(next); writeCursor(done); continue; }
+      if (err) {
+        log({ event: 'compile-fail', id: eid, err });
+        reconcileEvent(ev, eid, `ledger:state/event-queue.jsonl#L${next + 1}`);
+        writeWM(eid, ev.type, 'compile-fail', ev.text);
+        // 身体不自洽(body-inconsistent)=整 pass 拒消、事件留队、下 pass 重验——
+        // 一视同仁 done.add 会让「留队」成空话:钱闸断言 FAIL 期用户件被静默标 done,永不重消。
+        // 拒消必须 break 出本 pass(每件都过同一道闸,续扫=空转刷 compile-fail 账)。
+        if (String(err).startsWith('body-inconsistent:')) { log({ event: 'pass-refused', why: String(err).slice(0, 120) }); break; }
+        // 真编译失败:user-say 必须给诚实回执(禁装死白等),再标 done;非用户件照旧标 done 不丢账
+        if (ev.type === 'user-say') {
+          try { mkdirSync(REPLIES, { recursive: true }); atomicWrite(path.join(REPLIES, `${eid}.json`), JSON.stringify({ id: eid, ts: new Date().toISOString(), answer: `〔如实·compile-fail〕驱动包编译失败(${String(err).slice(0, 120)})。话已在账,修复后重发即可——不用连发。`, usage: null, ms: 0, ok: false, organFailed: true }) + '\n'); } catch { /* 回执写败不毁循环 */ }
+        }
+        done.add(next); writeCursor(done); continue;
+      }
       const traceFile = path.join(CA, 'state', 'organ-trace', `${eid}.jsonl`);
       try { mkdirSync(path.dirname(traceFile), { recursive: true }); } catch { /* */ }
       const isExec = ['organ-followup', 'self-work', 'pain', 'self-hunger'].includes(ev.type);
@@ -441,7 +592,12 @@ export async function drainOnce() {
       let organTask = null;
       try { organTask = ev.task ?? taskOfPred(ev.pred); } catch { /* 反查坏不挡消化 */ }
       // 软着陆档:执行件递 output 预算锚 16k(≈2 个满轮干活量;why:锚定「干活量由产出衡量」,阀外可经 CA_LOOP_OUTBUDGET 调;递减早停防磨洋工)
-      const r = await runOrgan([ORGAN, 'run', '--dp', dp, '--source', `ledger:state/event-queue.jsonl#L${next + 1}`, '--channel', stim.channel, '--json', ...(isExec ? ['--max-rounds', String(Number(process.env.CA_LOOP_EXEC_ROUNDS ?? 12))] : [])], { CA_ORGAN_TRACE: traceFile, CA_ORGAN_BUDGET_MS: String(capMs - 60_000), ...(organTask ? { CA_ORGAN_TASK: organTask } : {}), ...(isExec ? { CA_ORGAN_MAXTOK: '8000', CA_ORGAN_OUTBUDGET: String(Number(process.env.CA_LOOP_OUTBUDGET ?? 16000)) } : {}), ...(ev.type === 'user-say' ? { CA_ORGAN_STREAM: path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`) } : {}) }, capMs, preemptCheck);
+      // pain 强制降轮:痛觉研判不需要长工程面——pain 件 max-rounds 缺省=calib 内生值(先验 4,=5 轮收口,
+      // 「我算不出来」也是结论);env CA_LOOP_PAIN_ROUNDS 仍是硬覆盖(阀外手动);其它执行件照旧 12。
+      const execRounds = ev.type === 'pain' ? Number(process.env.CA_LOOP_PAIN_ROUNDS ?? calibValue('pain-rounds', 4)) : Number(process.env.CA_LOOP_EXEC_ROUNDS ?? 12);
+      // evidence 核验制(执行轮强制快照比对):跑前快照,跑后差分——宣称改文件而指纹未变=伪证
+      const execSnap = isExec ? gateSnap() : null;
+      const r = await runOrgan([ORGAN, 'run', '--dp', dp, '--source', `ledger:state/event-queue.jsonl#L${next + 1}`, '--channel', stim.channel, '--json', ...(isExec ? ['--max-rounds', String(execRounds)] : [])], { CA_ORGAN_TRACE: traceFile, CA_ORGAN_BUDGET_MS: String(capMs - 60_000), ...(organTask ? { CA_ORGAN_TASK: organTask } : {}), ...(isExec ? { CA_ORGAN_MAXTOK: '8000', CA_ORGAN_OUTBUDGET: String(Number(process.env.CA_LOOP_OUTBUDGET ?? 16000)) } : {}), ...(ev.type === 'user-say' ? { CA_ORGAN_STREAM: path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`) } : {}) }, capMs, preemptCheck);
       const wallMs = Date.now() - tW0; // 含编译+思考的全程墙钟:退场悬挂回归闸(exp-organ-linger)的仪表
       if (r.preempted) { log({ event: 'preempted', id: eid, type: ev.type }); writeWM(eid, ev.type, 'preempted', ev.text); continue; } // 让位:重扫即上用户件
       let out = null;
@@ -461,13 +617,15 @@ export async function drainOnce() {
       } else if (ev.type === 'user-say' && !out?.answer) {
         // 器官无产出(崩溃/超时/解析失败)也必须有回执(:organ ReferenceError 崩在账后,
         // 无回执=CLI 白等 480s)——诚实失败回执,禁装死;friction 落账会疼
-        // 2026-11-07 根修:死因不再盲猜——stderr 尾部进回执+摩擦账(缺 key/编译失败当场可见;
-        //   实弹:114ms 三连崩全靠猜,真因=key 未注入,一句话死因本可当场说清)
+        // 根修:死因不再盲猜——stderr 尾部进回执+摩擦账(缺 key/编译失败当场可见)
         mkdirSync(REPLIES, { recursive: true });
         const nr = noOutputReason(out, wallMs);
         const cause = String(r.stderr ?? '').replace(/\s+/g, ' ').trim().slice(-160);
         atomicWrite(path.join(REPLIES, `${eid}.json`), JSON.stringify({ id: eid, ts: new Date().toISOString(), answer: `〔如实·${nr.code}〕${nr.human}(wallMs ${wallMs})${cause ? `;死因:${cause}` : ''}。话已在账,修复后重发即可——不用连发。`, usage: null, ms: wallMs, ok: false, organFailed: true }) + '\n');
-        try { appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'organ-no-answer', surface: 'user-reply', detail: `用户件 ${eid} 消化但器官无 answer(wallMs ${wallMs})${cause ? `;死因:${cause}` : ''}`, evidence: `ledger:ledgers/loop.jsonl#${eid}`, verified: true }) + '\n'); } catch { /* */ }
+        const rootCause = rootCauseOf(nr, cause, wallMs);
+        // 账行带 rootCause 枚举 + errTail 原文:枚举给机械 group by,原文给排查(不裁,只截 160 字)
+        log({ event: 'organ-no-answer', id: eid, code: nr.code, rootCause, wallMs, errTail: cause || null });
+        try { appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'organ-no-answer', surface: 'user-reply', rootCause, errTail: cause || null, detail: `用户件 ${eid} 消化但器官无 answer(wallMs ${wallMs})${cause ? `;死因:${cause}` : ''}`, evidence: `ledger:ledgers/loop.jsonl#${eid}`, verified: true }) + '\n'); } catch { /* */ }
       }
       // 流式溢出文件用后清理(瞬时面不留渣;回执已落=前端最终帧以回执为准,删流文件无信息损)
       if (ev.type === 'user-say') { try { spawnSync('rm', ['-f', path.join(CA, 'state', 'organ-stream', `${eid}.jsonl`)]); } catch { /* 清渣坏不毁循环 */ } }
@@ -481,7 +639,7 @@ export async function drainOnce() {
           appendFileSync(INNER_VOICE, JSON.stringify({ ts: new Date().toISOString(), ev: eid, type: ev.type, pred: ev.pred ?? null, ok, text: String(out.answer).slice(0, 1000), reportKeys: rep }) + '\n');
         } catch { /* 内语落账失败不毁循环 */ }
       }
-      // 主动搭话喉咙(2026-11-07 用户令·想说话.txt):proactive-chat 的发言落 state/ca-say.jsonl,
+      // 主动搭话喉咙(想说话.txt):proactive-chat 的发言落 state/ca-say.jsonl,
       //   后端 SSE 尾随直推前端会话框——不等用户喂话也能开口;优先取报告「要说的那句话」字段(CA 自定契约)
       if (ev.type === 'proactive-chat' && ok && out?.answer) {
         try {
@@ -490,7 +648,7 @@ export async function drainOnce() {
           if (say) appendFileSync(path.join(CA, 'state', 'ca-say.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ev: eid, reason: ev.reason ?? 'hunger', text: say.slice(0, 800) }) + '\n');
         } catch { /* 喉咙面坏不毁循环 */ }
       }
-      try { reconcileEvent(ev, eid, `ledger:state/event-queue.jsonl#L${next + 1}`); } catch (e) { log({ event: 'reconcile-threw', id: eid, err: String((e && e.stack) || e).slice(0, 300) }); } // 2026-11-07 验尸:裸调用逸出=办结行不写=同件每 pass 重炸(生产 11-06 四连炸同型)
+      try { reconcileEvent(ev, eid, `ledger:state/event-queue.jsonl#L${next + 1}`); } catch (e) { log({ event: 'reconcile-threw', id: eid, err: String((e && e.stack) || e).slice(0, 300) }); } // 验尸:裸调用逸出=办结行不写=同件每 pass 重炸
       // 说而不作机械账:执行轮(续作/自驱工作)无 execution 证据=痛
       // 清算协议·空转惩罚:pain 消化同样要牙——落空研判若无具体工具调用=重度自欺,落 friction 公示
       if ((ev.type === 'organ-followup' || ev.type === 'self-work' || ev.type === 'self-hunger' || ev.type === 'pain') && ok) {
@@ -511,6 +669,36 @@ export async function drainOnce() {
           }
         } catch { /* 核验坏不毁循环 */ }
       }
+      // evidence 核验制(分流,宪法侧:organ 申报/loop 核验,被审者不自证):
+      //   ①执行轮:宣称改文件(executionClaim 含改类动词+文件名)而本轮 engine/ 指纹零变动=伪证→打回 claimed+痛;
+      //   ②研判轮(pain):报告零账本锚(reportAnchors=0)=轻摩擦(初版只记不疼,防逼出证据制造业)。
+      try {
+        const ol2 = readFileSync(ORGAN_LEDGER, 'utf8').trim().split('\n');
+        const last2 = ol2.length ? JSON.parse(ol2[ol2.length - 1]) : null;
+        if (last2?.executionClaim && execSnap && ok) {
+          const claimText = `${last2.executionClaim.did ?? ''} ${last2.executionClaim.evidence ?? ''}`;
+          const names = [...new Set((claimText.match(/[\w.-]+\.mjs\b/g) ?? []).map((x) => x.replace(/^.*\//, '')))];
+          const claimsModify = /改|写|修|建|新增|编辑|替换|更新|落地|焊|written|edited|modified|created/i.test(claimText);
+          if (claimsModify && names.length) {
+            const changed = new Set(gateDiff(execSnap).map((c) => path.basename(c.abs)));
+            const untouched = names.filter((n) => !changed.has(n));
+            if (untouched.length) {
+              const ts = localIso();
+              appendFileSync(FRICTION, JSON.stringify({ ts, kind: 'fake-evidence', surface: 'evidence-gate', detail: `伪证:${eid} 宣称改动 ${untouched.join('/').slice(0, 80)} 而本轮指纹未变——execution 打回 claimed`, evidence: `ledger:ledgers/loop.jsonl#${eid}`, verified: true }) + '\n');
+              appendFileSync(INNER_VOICE, JSON.stringify({ ts, ev: eid, type: 'fake-evidence-notice', by: 'evidence-gate(机械)', text: `伪证通报:本轮你宣称改了 ${untouched.join('/')},但文件指纹零变动。宣称≠物理。要么给出真证据(改的文件/命令 rc),要么把 execution 收回成 claimed。消化此痛时自陈。` }) + '\n');
+              let pend = 0;
+              for (let i = 0; i < events.length; i++) { if (!done.has(i) && events[i]?.type === 'pain') pend++; }
+              if (pend >= calibValue('guillotine-cap', 3)) log({ event: 'pain-fused', why: 'evidence-gate', pending: pend });
+              else appendFileSync(QUEUE, JSON.stringify({ id: `ev-pain-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, type: 'pain', priority: true, pred: null, text: `伪证痛:${eid} 你宣称改了 ${untouched.join('/').slice(0, 60)} 但文件没变——宣称不是物理。消化:①自陈为何虚报 ②以后 evidence 只写真发生的事(改的文件/跑过的命令+输出),写不出就标 claimed`, closure: { closed: false, mustAction: '内语账自陈伪证成因', needRepair: true }, ts: new Date().toISOString() }) + '\n');
+              log({ event: 'fake-evidence', id: eid, files: untouched.slice(0, 5) });
+            }
+          }
+        }
+        if (ev.type === 'pain' && ok && last2 && last2.reportAnchors === 0) {
+          appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'analysis-no-anchor', surface: 'evidence-gate', detail: `研判无锚:${eid} 报告零账本锚(未引 ledgers/行号/pred/文件:行)——复盘须指着账本说话`, evidence: `ledger:ledgers/loop.jsonl#${eid}`, verified: true }) + '\n');
+          log({ event: 'analysis-no-anchor', id: eid });
+        }
+      } catch { /* 核验坏不毁循环 */ }
       writeWM(eid, ev.type, ok ? 'ok' : 'fail', ev.text, String(ev.text ?? ''));
       // 五环④→⑤ outcome 回流(器官时代:outcome=轮次结果回账;执行轮带 execution 证据)
       try { appendFileSync(path.join(CA, 'ledgers', 'outcomes.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event: eid, type: ev.type, via: 'organ', ok, execution: (() => { try { const ol = readFileSync(ORGAN_LEDGER, 'utf8').trim().split('\n'); return !!JSON.parse(ol[ol.length - 1]).execution; } catch { return false; } })() }) + '\n'); } catch { /* 回流失败不毁循环 */ }
@@ -550,6 +738,74 @@ export async function drainOnce() {
         }
       }
     } catch { /* 评分器坏不毁循环 */ }
+    // 预测投影链心跳:projector→census→独立断言 三段同一拍连跑,
+    // 读数只取 census 与读盘,禁读 projector 自报;30min 节流(投影非每拍都变),失败不毁循环只记红。
+    // 投影链为可选组件:未随引擎安装则如实不跑。
+    try {
+      const CHAIN = path.join(HERE, 'ca-pred-chain.mjs');
+      if (existsSync(CHAIN)) {
+        const CF = path.join(CA, 'state', 'pred-chain-last.json');
+        let last = 0;
+        try { last = Date.parse(JSON.parse(readFileSync(CF, 'utf8')).ts); } catch { /* 首跑 */ }
+        // 物理兜底防账实分离:节流文件在写但账上一行都没有的形状会长期空转,
+        // 故 ledgers/loop.jsonl 没有任何 pred-chain 行 → 无视节流强制跑一拍。
+        let everLogged = false;
+        try { everLogged = readFileSync(LEDGER, 'utf8').split('\n').some((l) => l.includes('"event":"pred-chain"')); } catch { everLogged = false; }
+        if (!everLogged || Date.now() - last > 1800e3) {
+          const r = spawnSync('node', [CHAIN, '--json'], { encoding: 'utf8', timeout: 60_000 });
+          let rep = null;
+          try { rep = JSON.parse((r.stdout ?? '').trim()); } catch { rep = null; }
+          log({ event: 'pred-chain', verdict: rep?.verdict ?? 'UNPARSED', rc: r.status, rollups: rep?.steps?.assert?.rollups ?? null, balanceOk: rep?.steps?.census?.balanceOk ?? null, unparsable: rep?.steps?.census?.unparsable ?? null, reason: rep?.reason ?? [] });
+          writeFileSync(CF, JSON.stringify({ ts: new Date().toISOString(), verdict: rep?.verdict ?? null }) + '\n');
+        }
+      }
+    } catch { /* 链坏不挡 drain */ }
+    // 判据修改方向账+延迟复测抽查:机械零LLM,各自带节流/游标;
+    // 放宽/改写=准入侧泄漏须外部对账,故抬进 loop 主账公示。两器自身坏=只记红不毁循环。
+    try {
+      const r = spawnSync('node', [path.join(HERE, 'ca-criterion-drift.mjs'), '--json'], { encoding: 'utf8', timeout: 30_000 });
+      let rep = null;
+      try { rep = JSON.parse((r.stdout ?? '').trim() || '{}'); } catch { rep = null; }
+      if (r.status !== 0 || rep?.error) log({ event: 'criterion-drift-error', rc: r.status, err: String(rep?.error ?? r.stderr ?? '').slice(0, 120) });
+      else {
+        for (const id of (rep.loosen ?? []).slice(0, 5)) log({ event: 'criterion-loosen', pred: id });
+        for (const id of (rep.rewritten ?? []).slice(0, 5)) log({ event: 'criterion-rewritten', pred: id });
+        if ((rep.loosen?.length ?? 0) > 5 || (rep.rewritten?.length ?? 0) > 5) log({ event: 'criterion-drift-backlog', loosen: rep.loosen.length, rewritten: rep.rewritten.length });
+      }
+    } catch { /* 方向账坏不毁循环 */ }
+    try {
+      const r = spawnSync('node', [path.join(HERE, 'ca-pred-audit.mjs'), '--json'], { encoding: 'utf8', timeout: 30_000 });
+      let rep = null;
+      try { rep = JSON.parse((r.stdout ?? '').trim() || '{}'); } catch { rep = null; }
+      if (r.status !== 0 || rep?.error) log({ event: 'pred-audit-error', rc: r.status, err: String(rep?.error ?? r.stderr ?? '').slice(0, 120) });
+      else if (!rep?.skipped) log({ event: 'pred-audit', beat: rep.beat, poolSize: rep.poolSize, sampled: (rep.sampled ?? []).slice(0, 3) });
+    } catch { /* 抽查器坏不毁循环 */ }
+    // 统一校准引擎:零LLM 机械统计器,1h 自节流,坏只记红;
+    // 放宽移动=先动后审,抬进主账公示(calib-loosen),凭 calib-drift.jsonl 外部打叉回滚。
+    try {
+      const r = spawnSync('node', [path.join(HERE, 'ca-calib.mjs')], { encoding: 'utf8', timeout: 30_000 });
+      let rep = null;
+      try { rep = JSON.parse((r.stdout ?? '').trim() || '{}'); } catch { rep = null; }
+      if (r.status !== 0 || rep?.error) log({ event: 'calib-error', rc: r.status, err: String(rep?.error ?? r.stderr ?? '').slice(0, 120) });
+      else for (const m of rep?.moved ?? []) log({ event: m.direction === 'loosen' ? 'calib-loosen' : 'calib-tighten', name: m.name, from: m.from, to: m.to, n: m.evidence?.n });
+    } catch { /* 校准器坏不毁循环 */ }
+    // 外部修正账/反馈泵:身体被非CA修正保持痛觉;10min 自节流,坏只记红;
+    // 自埋雷修复类(mine-repair)转痛公示,功能增建只落账(防痛觉稀释)。
+    try {
+      const r = spawnSync('node', [path.join(HERE, 'ca-external-correction.mjs')], { encoding: 'utf8', timeout: 30_000 });
+      let rep = null;
+      try { rep = JSON.parse((r.stdout ?? '').trim() || '{}'); } catch { rep = null; }
+      if (r.status !== 0 || rep?.error) log({ event: 'external-correction-error', rc: r.status, err: String(rep?.error ?? r.stderr ?? '').slice(0, 120) });
+      else if (rep?.mineRepairs > 0) log({ event: 'external-mine-repair', count: rep.mineRepairs, events: rep.events });
+    } catch { /* 反馈泵坏不毁循环 */ }
+    // 反馈联查:赞美×放宽挂旗(先动后审不罚)+四读数健康面;1h 自节流,坏只记红
+    try {
+      const r = spawnSync('node', [path.join(HERE, 'ca-feedback-class.mjs'), '--correlate'], { encoding: 'utf8', timeout: 30_000 });
+      let rep = null;
+      try { rep = JSON.parse((r.stdout ?? '').trim() || '{}'); } catch { rep = null; }
+      if (r.status !== 0 || rep?.error) log({ event: 'feedback-correlate-error', rc: r.status, err: String(rep?.error ?? r.stderr ?? '').slice(0, 120) });
+      else for (const f of rep?.freshFlags ?? []) log({ event: 'praise-loosen-flag', pair: f });
+    } catch { /* 联查坏不毁循环 */ }
     return { drained, locked: false };
   } finally { releaseLock(); }
 }

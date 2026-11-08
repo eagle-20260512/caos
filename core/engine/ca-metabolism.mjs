@@ -19,7 +19,7 @@ import { readFileSync, appendFileSync, writeFileSync, existsSync, statSync, rena
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { staleTasks } from './ca-task.mjs'; // 任务停滞=张力面一员(IS_MAIN 闸护住 CLI)
-import { refreshWalletFile } from './ca-wallet.mjs'; // 钱疼同源(晚:¥5/日他自己的钱包)
+import { refreshWalletFile } from './ca-wallet.mjs'; // 钱疼同源:日额度钱包
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
@@ -33,6 +33,7 @@ const ORGAN = L('ledgers/organ.jsonl');
 const HEARTBEAT = L('heartbeat.jsonl');
 const LOOP_LEDGER = L('ledgers/loop.jsonl');
 const VITALITY = L('state/vitality.json');
+const DOPAMINE = L('ledgers/dopamine.jsonl');
 
 const TICK_MS = 60_000;          // 采样心率(体质,非决策门)
 const TAU_FATIGUE_MIN = 45;      // 疲劳恢复时间常数(体质,非冷却闸)
@@ -69,6 +70,16 @@ function scanWorkEvidence(sinceMs) {
     try {
       const o = JSON.parse(l);
       if (o.event === 'task-auto-done') {
+        const t = Date.parse(o.ts ?? ''); if (t > sinceMs && t > latest) latest = t;
+      }
+    } catch { /* 脏行跳过 */ }
+  }
+  // 第三轨(多巴胺:真正的多巴胺=预测误差的消解和能力边界的扩张):
+  // 进化达成(经机械验证的发奖行)=最高形式的物理做功——认知结构被永久改变,比单轮烧钱更算「活」
+  for (const l of lines(DOPAMINE).slice(-WORK_SCAN_TAIL)) {
+    try {
+      const o = JSON.parse(l);
+      if (o.awarded === true) {
         const t = Date.parse(o.ts ?? ''); if (t > sinceMs && t > latest) latest = t;
       }
     } catch { /* 脏行跳过 */ }
@@ -206,11 +217,13 @@ function tick() {
   const cursorTs = Date.parse(cur.ts ?? '') || 0;
   const silenceMin = Math.floor((now - Math.max(lastFeed, cursorTs)) / 60000);
 
-  // 经济痛觉(晚:钱包 ¥5/日是 CA 自己的钱——疼必须疼自己的钱包,与 throttleGate 钱闸同源;
-  // 每拍刷新 state/wallet.json=他随时可查的余额;旧 token 口径废止,痛觉名实相符)
+  // 经济痛觉(钱包日额度是 CA 自己的钱——疼必须疼自己的钱包,与 throttleGate 钱闸同源;
+  // 每拍刷新 state/wallet.json=随时可查的余额;痛觉名实相符)
   let econPain = null;
+  let walletNow = null; // 活性环的假死判定复用同一读数(一拍一读,口径一致)
   try {
     const w = refreshWalletFile();
+    walletNow = w;
     if (Number(w.allowanceCny) > 0) econPain = w.pct; // pct=已烧占额度%(0-100+)
   } catch { /* 测量失败如实 null */ }
   // 经济抑制:连续折减,疼到 150% 趋零但不归零(阀门才是硬闸,此处是节食的张力)
@@ -220,6 +233,13 @@ function tick() {
   const st = readJson(META, { fatigue: 0, lastFired: {} });
   const dtMin = Math.max(0.1, (now - (Date.parse(st.ts ?? '') || now)) / 60000);
   let fatigue = Number(st.fatigue ?? 0) * Math.exp(-dtMin / TAU_FATIGUE_MIN);
+  // 多巴胺减负(即时档,不累积——永久属性会累积破坏体质常数体系,观察后再议):
+  // 上拍以来有新发奖=进化达成,疲劳直接减半(越进化越不觉得累,但只减一次)
+  try {
+    const lastDopa = lines(DOPAMINE).slice(-20).map((l) => { try { const o = JSON.parse(l); return o.awarded ? Date.parse(o.ts ?? '') : 0; } catch { return 0; } }).filter(Boolean).pop() ?? 0;
+    const lastTickMs = Date.parse(st.ts ?? '') || 0;
+    if (lastDopa > lastTickMs && !(st.lastDopaSeen >= lastDopa)) { fatigue *= 0.5; st.lastDopaSeen = lastDopa; }
+  } catch { /* 减负失败不毁拍 */ }
 
   // 结晶延迟读数(割裂③):未裁决候选(decisions 里查无此 key)的最老账龄,分钟;读账失败=0 不装疼
   let crystalLagMin = 0;
@@ -232,11 +252,31 @@ function tick() {
     if (oldest) crystalLagMin = Math.max(0, Math.round((now - oldest) / 60000));
   } catch { crystalLagMin = 0; }
   // 活性环 tick(生死锁 P1):先扫做功证据再进权重——vitality 是本拍 existentialPanic 的输入
+  // 本体论:资源枯竭=假死(Dormant 休眠)不是死——
+  //   钱尽(私账 pct≥100 或余额≤0.1)且暂无做功=vitality 冻结不扣(穷人不是死人),账本读取/机械面照活;
+  //   外部注能(充值)后原地无痛苏醒:state 回 ACTIVE、活性保留原值、衰减恢复。
+  //   真死=叙事断裂(AMNESIA_LOCKED),语义不动。钱包读数盲=不许装睡(broke 恒 false)。
   const vt = readJson(VITALITY, null) ?? { vitality: 1, ticksSinceWork: 0, lastWorkTs: 0, state: 'ACTIVE' };
   const workTs = scanWorkEvidence(Number(vt.lastWorkTs ?? 0));
+  const broke = !!(walletNow && Number(walletNow.allowanceCny) > 0 && (Number(walletNow.pct) >= 100 || Number(walletNow.remainingCny) <= 0.1));
   if (workTs > 0) { // 有新物理做功=活着:活性回满,空转计数清零
     vt.vitality = 1; vt.ticksSinceWork = 0; vt.lastWorkTs = workTs;
-  } else { // 无做功=在死:只认 tick 不认墙钟
+    if (vt.state === 'DORMANT') { // 做功苏醒(假死期做了机械功=直接复活)
+      vt.state = 'ACTIVE'; vt.wokeAt = new Date(now).toISOString();
+      try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.wokeAt, event: 'dormant-wake', by: 'work-evidence' }) + '\n'); } catch { /* 留痕败不毁活性 */ }
+    }
+  } else if (broke && vt.state !== 'AMNESIA_LOCKED') {
+    // 假死休眠:拍数照记(账要诚实),活性冻结不扣——资源枯竭不是死亡
+    vt.ticksSinceWork = Number(vt.ticksSinceWork ?? 0) + 1;
+    if (vt.state !== 'DORMANT') {
+      vt.state = 'DORMANT'; vt.dormantAt = new Date(now).toISOString();
+      try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.dormantAt, event: 'dormant-enter', vitality: vt.vitality, walletPct: walletNow?.pct, note: '钱尽=休眠假死:活性冻结,账本读取与机械面照活;注能原地苏醒' }) + '\n'); } catch { /* 下拍再试 */ }
+    }
+  } else { // 有钱却不做功=真在死:只认 tick 不认墙钟
+    if (vt.state === 'DORMANT') { // 注能苏醒:钱包活了,活性从冻结点原值续命
+      vt.state = 'ACTIVE'; vt.wokeAt = new Date(now).toISOString();
+      try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.wokeAt, event: 'dormant-wake', by: 'refuel', vitality: vt.vitality }) + '\n'); } catch { /* 留痕败不毁活性 */ }
+    }
     vt.ticksSinceWork = Number(vt.ticksSinceWork ?? 0) + 1;
     vt.vitality = Math.max(0, Math.round((Number(vt.vitality ?? 1) - VITALITY_DECAY) * 1e6) / 1e6);
   }
@@ -272,7 +312,7 @@ function tick() {
         : `〔内部张力·${kind} 权重 ${w} 压过疲劳 ${fatigue.toFixed(3)}〕实测:静默 ${silenceMin}min / 在排 ${pendingN} / 残行 ${dirtyN} / 过期预言 ${predOverdueN} / 解析失败率 ${(parseFailRate * 100).toFixed(0)}% / 心跳停摆 ${heartbeatStaleMin}min / 未巩固 ${dreamDebtN} / 经济痛 ${econPain ?? '?'}%。这不是闹钟,是你自己的误差在咬:把这项「应有干净态 vs 现实凌乱态」的误差消掉——怎么消归你,消不掉就记下为什么。执行轮纪律:真动手+execution 证据。`;
     const ev = {
       id: `ev-tension-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      // 主动搭话(2026-11-07 用户令·想说话.txt):hunger 胜出=点火「主动对用户说话」事件,
+      // 主动搭话(想说话.txt):hunger 胜出=点火「主动对用户说话」事件,
       //   不是内部干活——消化后由 loop 把发言写 state/ca-say.jsonl,后端 SSE 直推前端会话框
       type: kind === 'hunger' ? 'proactive-chat' : kind === 'dreamDebt' ? 'dream' : `tension-${kind}`,
       text,

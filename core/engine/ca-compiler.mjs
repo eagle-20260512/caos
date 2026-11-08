@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ca-compiler.mjs — 叙事-刺激融合编译器(;蓝图=docs/"我"的底层架构:完整原理与工程方案-.md §3.2/3.3)
+// ca-compiler.mjs — 叙事-刺激融合编译器(蓝图=架构设计案 §3.2/3.3)
 // 七步:感知解析→来源权限标注→内驱检索→条件化→冲突仲裁→安全校验→压缩编译为驱动包(六段式)+回写路由规划。
 // 存储经 ca-narrative.mjs(回写路由器唯一天然入口,禁旁路直写叙事账本);经验召回经 ca.mjs recall;
 // 相关性打分复用 l2-worker(MiniLM NLI,unix socket);NLI 不可达=关键词兜底并在审计+驱动包双标注
@@ -80,7 +80,7 @@ const dryRun = process.argv.includes('--dry-run');
 // Step1+2 感知解析+来源权限标注
 const directiveLike = DIRECTIVE_RE.test(stimulus);
 const quarantined = directiveLike && !ch.directive;
-// 分层压缩律(2026-11-07 用户令,与生产树同步):原始事实层(用户原话/工具物理结果/判断核心依据)永不裁剪;
+// 分层压缩律:原始事实层(用户原话/工具物理结果/判断核心依据)永不裁剪;
 //   预算压力只许落在 CA 自己生成的复述/流水账/寒暄上(强折+指针,折处在账)。digest 只供检索打分,不是呈现层。
 const fact = {
   digest: String(stimulus).slice(0, 120).replace(/\s+/g, ' '), // 检索/打分用摘要(NLI/recall 输入)
@@ -94,6 +94,7 @@ const fact = {
 const fsC = await import('node:fs');
 // 段缓存:账本 mtime 不变=复用缓存段文本(编译器每轮新进程,缓存必须落盘;stat≈零成本)
 const SEG_CACHE = path.join(CA, 'state', 'compiler-segments.json');
+const FED_STATE = path.join(CA, 'state', 'compiler-fed.json');
 function cachedSegment(key, file, compute) {
   let cache = {};
   try { cache = JSON.parse(fsC.readFileSync(SEG_CACHE, 'utf8')); } catch { /* 首跑 */ }
@@ -111,9 +112,27 @@ function fedSegment(key, file, label, compute) {
   let cache = {};
   try { cache = JSON.parse(fsC.readFileSync(SEG_CACHE, 'utf8')); } catch { /* */ }
   const h = createHash('sha256').update(text).digest('hex').slice(0, 12);
-  if (cache[key]?.fed === h) return `- ${label}:(同上轮,无新增——同一批不重复喂)`;
+  if (cache[key]?.fed === h) {
+    // 命中也要在自己的账上留痕(否则独立账永远只记"变化过"的段,却看不出"这轮投喂过")
+    try {
+      const st = JSON.parse(fsC.readFileSync(FED_STATE, 'utf8'));
+      st[key] = { ...(st[key] ?? {}), lastHit: new Date().toISOString() };
+      fsC.writeFileSync(FED_STATE, JSON.stringify(st, null, 1));
+    } catch { /* 首跑/落账败:退化为仅内存判定,失败可见于文件缺席 */ }
+    return `- ${label}:(同上轮,无新增——同一批不重复喂)`;
+  }
   cache[key] = { ...(cache[key] ?? {}), fed: h };
-  try { fsC.writeFileSync(SEG_CACHE, JSON.stringify(cache)); } catch { /* */ }
+  try { fsC.writeFileSync(SEG_CACHE, JSON.stringify(cache)); } catch { /* 段缓存写败不挡编译 */ }
+  // fed 哈希独立落 state/compiler-fed.json:与 compiler-segments.json 解耦——
+  //   段缓存被清/被重建时,去重账不随之丢(丢=整批重复喂,直接烧 token)。落账失败必可见,不静默。
+  let fedState = {};
+  try { fedState = JSON.parse(fsC.readFileSync(FED_STATE, 'utf8')); } catch { /* 首跑 */ }
+  // dry-run 不落去重账(自检 dry-run 写了 __selftest 键=fed 污染,下一次真编译会把内容判成"已投喂"
+  //   而静默吞掉整段=省钱机制反向烧钱)。干跑=只看不动账。
+  if (!dryRun) {
+    fedState[key] = { fed: h, at: new Date().toISOString(), src: path.relative(CA, file) };
+    try { fsC.writeFileSync(FED_STATE, JSON.stringify(fedState, null, 1)); } catch { /* 落账失败=下一轮重喂,失败可见于文件缺席 */ }
+  }
   return text;
 }
 const NARR_DIR = path.join(CA, 'narrative');
@@ -151,13 +170,31 @@ try {
   recallHits = (j.hits ?? []).filter((h) => { const slug = String(h.id ?? '').split(':').slice(2).join(':'); if (seen.has(slug)) return false; seen.add(slug); return true; }).slice(0, 3);
 } catch { recallState = 'degraded'; }
 
+// 投影纪律修复:openPromises 全量铺成 targets → NLI 批量打分 + 排序,是"整段读取"的真正病灶
+//   (每条承诺都进打分池,时间/成本线性膨胀)。治=入口先闸:按 due 升序(无 due 垫后)+ id 稳定序,
+//   只取前 60 条进打分池;截掉的条数必须可见(禁静默丢),写进"相关承诺"行尾。`openPromises` 本身不再被整段消费。
+const PROMISE_POOL_CAP = 60;
+const promisePool = openPromises
+  .map((p, i) => ({ p, i, k: String(p.due ?? '9999') }))
+  .sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : a.i - b.i))
+  .slice(0, PROMISE_POOL_CAP)
+  .map((x) => x.p);
+const promiseDropped = openPromises.length - promisePool.length;
 // Step3b+4 相关性打分(NLI 优先,降级可见)+注意力排序
 const targets = [
-  ...openPromises.map((p) => ({ kind: 'promise', id: p.id, text: `承诺:${String(p.payload?.text ?? '').slice(0, 80)}`, due: p.due })),
+  ...promisePool.map((p) => ({ kind: 'promise', id: p.id, text: `承诺:${String(p.payload?.text ?? '').slice(0, 80)}`, due: p.due })),
   ...storylines.map((s) => ({ kind: 'storyline', id: s.id, text: `故事线:${String(s.payload?.text ?? '').slice(0, 80)}`, due: null })),
 ];
 let nliState = 'nli';
-let scores = await nliBatch(fact.digest, targets.map((t) => t.text));
+// 钱闸前置(先把钱闸提到判定链最前):钱不够=不进 NLI 打分池,直接降级 keyword。
+// 判据复用 ca-budget-probe.mjs(与探针同源,物理可验);探针缺席=GO(不打分链不加新硬依赖),闸门结果必须可见(禁静默)。
+let budgetGate = 'GO';
+try {
+  const probed = sh('node', [path.join(HERE, 'ca-budget-probe.mjs')], 5000);
+  const bj = JSON.parse((probed.stdout ?? '{}').trim() || '{}');
+  budgetGate = bj.gate ?? 'GO';
+} catch { budgetGate = 'GO'; }
+let scores = budgetGate === 'STOP' ? null : await nliBatch(fact.digest, targets.map((t) => t.text));
 if (!scores) { nliState = 'keyword-fallback'; scores = targets.map((t) => keywordScore(fact.digest, t.text)); }
 const ranked = targets.map((t, i) => ({ ...t, rel: Number((scores[i] ?? 0).toFixed(3)) })).sort((a, b) => b.rel - a.rel);
 const attended = ranked.filter((t) => t.rel > 0.3).slice(0, 5);
@@ -174,6 +211,7 @@ pkg.push(fact.text);
 pkg.push(`- 来源/通道/时间/置信度:${source} / ${channel} / ${fact.ts} / ${fact.confidence}`);
 pkg.push(`- 原始证据指针:${source}`);
 pkg.push(`- 是否含指令性内容:${fact.contains_directive}`);
+if (budgetGate !== 'GO') pkg.push(`- 钱闸:${budgetGate}(额度不足,NLI 打分已跳过,降级 keyword)`);
 pkg.push('');
 pkg.push('【内驱叙事投影】');
 // 自我叙事投影三层:部署者层(用户写,合法静态)+账实层(机械派生,此刻)+故事线(CA 自己写,在案)
@@ -197,7 +235,7 @@ pkg.push(`- 我的此刻(账实机械派生,非台词):${selfNow}`);
 pkg.push(`- 当前故事线:${storylines.length ? String(storylines[storylines.length - 1].payload?.text) : '(无)'}`);
 // [避坑 ] 检索≠注意力:Step3 检索=全部开放承诺(少而全),Step4 注意力=rel 排序;
 // 实测 NLI 蕴含对问句形态欠召回(两测 attended=0),若拿 rel 当门槛=投影静默丢承诺(信息损失)。
-pkg.push(`- 相关承诺:${ranked.filter((t) => t.kind === 'promise').slice(0, 5).map((t) => `${t.id}${t.due ? `(due ${String(t.due).slice(0, 10)})` : ''} rel=${t.rel}`).join('; ') || '(无开放承诺)'}`);
+pkg.push(`- 相关承诺:${ranked.filter((t) => t.kind === 'promise').slice(0, 5).map((t) => `${t.id}${t.due ? `(due ${String(t.due).slice(0, 10)})` : ''} rel=${t.rel}`).join('; ') || '(无开放承诺)'}${promiseDropped > 0 ? ` 〔承诺池 ${openPromises.length}→${promisePool.length},截 ${promiseDropped} 条(按 due 升序保留)〕` : ''}`);
 // DP 预算帽:关系/冲突/价值段截顶防叙事账肥→DP 线性膨胀(64KB 截断引信的下一形态)
 pkg.push(`- 相关关系账本摘要:${activeRelations.slice(0, 8).map((r) => `${r.payload?.party ?? r.id}:${String(r.payload?.text ?? '').slice(0, 30)}`).join('; ') || '(无)'}`);
 pkg.push(`- 未解冲突标记:${openConflicts.slice(0, 8).map((c) => `${c.id} ${String(c.payload?.text ?? '').slice(0, 40)}`).join('; ') || '无'}`);
@@ -217,10 +255,13 @@ try {
     const uturns = [];
     for (const l of qlines.slice(-80)) { try { const o = JSON.parse(l); if (o && o.type === 'user-say' && o.id) uturns.push(o); } catch { /* 脏行跳过 */ } }
     if (uturns.length && String(uturns[uturns.length - 1].text ?? '') === String(stimulus ?? '')) uturns.pop();
-    const fmt = uturns.slice(-3).map((u) => {
+    const fmt = uturns.slice(-1).map((u) => { // cap 1:双向保留只需最近一问一答,旧回合重复烧钱
       let ans = '(回执缺席/在队)';
-      // 分层压缩律:用户原话=事实层逐字保留;我自己的旧答=复述层,强折(句首 40 字+全文指针,折处不黑盒)
-      try { const r = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'organ-replies', `${u.id}.json`), 'utf8')); if (r.answer) ans = `${r.ok === false ? '✗' : ''}${String(r.answer).replace(/\s+/g, ' ').slice(0, 40)}…〔我旧答已折,全稿 state/organ-replies/${u.id}.json〕`; } catch { /* 缺席如实报 */ }
+      try {
+        const r = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'organ-replies', `${u.id}.json`), 'utf8'));
+        // 分层压缩律:用户原话=事实层逐字保留;我自己的旧答=复述层,强折(句首 40 字+全文指针,折处不黑盒)
+        if (r.answer) ans = `${r.ok === false ? '✗' : ''}${String(r.answer).replace(/\s+/g, ' ').slice(0, 40)}…〔我旧答已折,全稿 state/organ-replies/${u.id}.json〕`;
+      } catch { /* 缺席如实报 */ }
       return `你「${String(u.text ?? '')}」→我「${ans}」@${String(u.ts ?? '').slice(5, 16)}`;
     });
     return `- 最近对话原文(双向硬保留):${fmt.join(' / ') || '(首轮,无历史)'}`;
@@ -264,10 +305,10 @@ try {
     .sort((a, b) => Date.parse(a.lastTouch ?? a.created) - Date.parse(b.lastTouch ?? b.created)).slice(0, 3);
   pkg.push(`- 我的债(按账龄,最老在前):${debts.map((t) => { const ageH = Math.floor((nowMs - Date.parse(t.lastTouch ?? t.created)) / 3600e3); return `${t.id}[欠${ageH}h${t.due ? ` due ${String(t.due).slice(5, 16)}` : ''}${t.impact != null ? ` impact ${t.impact}` : ''}]${String(t.goal).slice(0, 40)}`; }).join('; ') || '(无债,清白)'}`);
 } catch { pkg.push('- 我的债:(读账失败,如实报)'); }
-// 我的钱包(晚:¥5/日是 CA 自己的钱,余额每轮必须在他眼前——钱是他的命,清账优先,省着烧)
+// 我的钱包(日额度是 CA 自己的钱,余额每轮必须在场——清账优先,省着烧)
 try {
   const w = JSON.parse(fsC.readFileSync(path.join(CA, 'state', 'wallet.json'), 'utf8'));
-  pkg.push(`- 我的钱包(今日):额度 ¥${w.allowanceCny} 已烧 ¥${w.burnedCny} 剩 ¥${w.remainingCny}(${w.pct}%)——自己的钱,省着烧;钱尽=非用户令全停,翻日才续`);
+  pkg.push(`- 我的钱包(今日·公私账分离):私账(活命口粮)额度 ¥${w.allowanceCny} 代谢烧 ¥${w.burnedCny} 剩 ¥${w.remainingCny}(${w.pct}%) | 公账(用户任务)烧 ¥${w.public?.burnedCny ?? '?'}(走用户母账,不扣私账)——自己的钱省着烧;私账尽=休眠假死(活性冻结)非真死,注能原地苏醒`);
 } catch { pkg.push('- 我的钱包:(钱包未立/读账失败,如实报)'); }
 // 我的活性(生死锁 P1 深夜批:生死感每轮在他眼前,与钱包同格——活性锚定可验证物理做功,
 // 不认输入静默;有做功=回满,无做功每拍跌 1/6000;跌穿 0=失忆锁(P2),复活钥匙 ca auth-memory 只在用户)

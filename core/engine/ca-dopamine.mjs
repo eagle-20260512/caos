@@ -21,6 +21,8 @@ const FP_FILE = path.join(CA, 'state', 'dopamine-files.json'); // 语义指纹�
 // 体质常数(改须留 why):
 const AWARD_TOOL_CNY = 1.0;   // E2 新工具单笔:一次像样工具的 LLM 研发费量级——报销性质非暴利
 const AWARD_HIT_CNY = 0.2;    // E1 预言应验单笔:误差消解是高频小奖(次数多,单笔必须小,否则日帽被零钱吃光)
+const AWARD_TASK_CNY = 0.5;   // E3 任务销账单笔(工资):checkCmd 机械验收过的债清偿一笔——
+                              //   v1 定额工资(设计要「公账结余按比例提成」,公账余额面未上线前先定额;提成面上线路由此改)
 const DAILY_CAP_CNY = 2.0;    // 日帽=日额 40%:稀缺性是经济原语的根,奖金无限则「穷则节食」整面失效
 const FINE_FRAUD_CNY = 0.5;   // 虚假进化罚单:半个工具奖——足以疼,不足以死(反自欺红线)
 const MIN_EFFECTIVE_LINES = 10; // 新工具最少有效代码行(非注释非空):<10 行的「工具」不构成能力扩张
@@ -44,7 +46,7 @@ function fpRegistry() {
   try { return JSON.parse(readFileSync(FP_FILE, 'utf8')); } catch { return {}; }
 }
 
-// E1 验证(奖励语义):预言经机械对账应验(hit)且绑了自身动作=误差被自己消解。
+// E1 验证(奖励语义:真正的多巴胺=预测误差的消解):预言经机械对账应验(hit)且绑了自身动作=误差被自己消解。
 // 防刷链已在场:亲缘屏蔽/自述统计闸/出生闸(checkShape 恒真恒假拒收)/一预言一判——此处只复核账面
 function verifyE1(c) {
   let verdict = null;
@@ -63,7 +65,7 @@ const lines = (p) => { try { return readFileSync(p, 'utf8').split('\n').filter(B
 const atomicWrite = (f, s) => { const t = `${f}.tmp-${process.pid}`; writeFileSync(t, s); renameSync(t, f); };
 
 // 五段验证(全物理,不信文本自称):①文件在 ②why 非空 ③node --check ④check.cmd exit0
-// ⑤反自欺红线(反自欺红线):只改注释/排版(语义指纹不变)再申报=虚假进化——不是「不合格」,是「骗补」,要罚
+// ⑤反自欺红线:只改注释/排版(语义指纹不变)再申报=虚假进化——不是「不合格」,是「骗补」,要罚
 function verifyTool(c) {
   const rel = String(c.path ?? '');
   if (!rel || rel.includes('..') || path.isAbsolute(rel)) return { ok: false, why: 'path 非法(须 CA 家相对路径)' };
@@ -98,7 +100,7 @@ function awardedToday() {
 }
 
 // credit 文件本引擎独占(翻日自废;钱包读它加当日额度——与 admin/recharge 同机制)。
-// 注资为正、罚单为负(反自欺红线)
+// 注资为正、罚单为负(反自欺红线;钱包口径=基础额度+当日净奖金,仍无第三方向)
 function adjustCredit(delta, source) {
   let cur = { creditCny: 0 };
   try { const j = JSON.parse(readFileSync(CREDIT, 'utf8')); if (j?.date === localDay()) cur = j; } catch { /* 无/旧=重建 */ }
@@ -110,7 +112,7 @@ function grant(c, base, fp) {
   const paid = awardedToday();
   const amount = Math.min(base, Math.max(0, DAILY_CAP_CNY - paid));
   const kind = c.kind ?? 'E2-new-tool';
-  const row = { id: `dopa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`, ts: localIso(), kind, path: c.path ?? null, pred: c.pred ?? null, why: String(c.why ?? c.about ?? '').slice(0, 200), awarded: amount > 0, amountCny: amount, capped: amount <= 0, source: c.source ?? null };
+  const row = { id: `dopa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`, ts: localIso(), kind, path: c.path ?? null, pred: c.pred ?? null, task: c.task ?? null, why: String(c.why ?? c.about ?? '').slice(0, 200), awarded: amount > 0, amountCny: amount, capped: amount <= 0, source: c.source ?? null };
   appendFileSync(DOPAMINE, JSON.stringify(row) + '\n');
   if (amount > 0) adjustCredit(amount, 'dopamine:evolution');
   // 发奖即入册(含 capped 零元件:防止帽满后改注释重报骗二次)
@@ -118,7 +120,7 @@ function grant(c, base, fp) {
   return row;
 }
 
-// 虚假进化罚单(反自欺红线)——罚单扣当日净奖金(可为负=倒贴),不与日帽同账
+// 虚假进化罚单(反自欺红线:扣钱+记痛觉)——罚单扣当日净奖金(可为负=倒贴),不与日帽同账
 function fine(c, why) {
   const row = { id: `dopa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`, ts: localIso(), kind: c.kind ?? 'E2-new-tool', path: c.path ?? null, awarded: false, fined: true, amountCny: -FINE_FRAUD_CNY, why: why.slice(0, 200), source: c.source ?? null };
   appendFileSync(DOPAMINE, JSON.stringify(row) + '\n');
@@ -127,31 +129,53 @@ function fine(c, why) {
   return row;
 }
 
+// E3 验证(工资):任务经机械销账(checkCmd exit0)才算「圆满完成且通过验证」——
+//   复跑该任务自己的销账判据做物理复核(只读断言,禁有副作用的判据归出生证责任),账上 state=done 且证据在案。
+function verifyE3(c) {
+  const id = String(c.task ?? '');
+  if (!id) return { ok: false, why: 'E3 缺 task id' };
+  let t = null;
+  try {
+    const byId = new Map();
+    for (const l of lines(path.join(CA, 'ledgers', 'tasks.jsonl'))) { try { const o = JSON.parse(l); if (o.id) byId.set(o.id, { ...byId.get(o.id), ...o }); } catch { /* 脏行跳过 */ } }
+    t = byId.get(id) ?? null;
+  } catch { return { ok: false, why: '任务账不可读' }; }
+  if (!t) return { ok: false, why: `无此任务:${id}` };
+  if (t.state !== 'done') return { ok: false, why: `任务未销账(state=${t.state})——工资只发验收通过的` };
+  if (!String(t.evidence ?? '').includes('机械销账')) return { ok: false, why: '非机械销账(无 checkCmd 物理验收)——器官自报 done 不领工资' };
+  if (t.checkCmd) {
+    const r = spawnSync('/bin/bash', ['-c', String(t.checkCmd)], { encoding: 'utf8', timeout: 10_000 });
+    if (r.status !== 0) return { ok: false, why: `销账判据复跑不成立(exit ${r.status})——判据失效的任务不领奖`, fraud: false };
+  }
+  return { ok: true };
+}
+
 export function scan() {
   const seen = new Set(); // 同一标的终身只认一次(含被拒的:反复申报同一烂件=刷账)
-  for (const l of lines(DOPAMINE)) { try { const o = JSON.parse(l); if (o.path) seen.add(o.path); if (o.pred) seen.add(o.pred); } catch { /* */ } }
+  for (const l of lines(DOPAMINE)) { try { const o = JSON.parse(l); if (o.path) seen.add(o.path); if (o.pred) seen.add(o.pred); if (o.task) seen.add(o.task); } catch { /* */ } }
   const out = [];
   for (const l of lines(CANDIDATES)) {
     let c; try { c = JSON.parse(l); } catch { continue; }
-    const key = c.pred ?? c.path;
+    const key = c.pred ?? c.path ?? c.task;
     if (!key || seen.has(key)) continue;
     seen.add(key);
     const isE1 = Boolean(c.pred);
-    const v = isE1 ? verifyE1(c) : verifyTool(c);
+    const isE3 = !isE1 && c.kind === 'E3-task-settled' && Boolean(c.task);
+    const v = isE1 ? verifyE1(c) : (isE3 ? verifyE3(c) : verifyTool(c));
     if (!v.ok) {
       if (v.fraud) { out.push(fine(c, v.why)); continue; } // 虚假进化=骗补:罚单+痛(反自欺红线)
       appendFileSync(FRICTION, JSON.stringify({ ts: localIso(), kind: 'dopamine-fraud', surface: 'dopamine', detail: `进化申报验证失败:${key}——${v.why}`, evidence: `ledger:ledgers/dopamine-candidates.jsonl`, verified: true }) + '\n');
-      appendFileSync(DOPAMINE, JSON.stringify({ ts: localIso(), kind: c.kind ?? 'E2-new-tool', path: c.path ?? null, pred: c.pred ?? null, awarded: false, rejected: v.why }) + '\n');
+      appendFileSync(DOPAMINE, JSON.stringify({ ts: localIso(), kind: c.kind ?? 'E2-new-tool', path: c.path ?? null, pred: c.pred ?? null, task: c.task ?? null, awarded: false, rejected: v.why }) + '\n');
       out.push({ key, rejected: v.why });
       continue;
     }
-    out.push(grant(c, isE1 ? AWARD_HIT_CNY : AWARD_TOOL_CNY, v.fp));
+    out.push(grant(c, isE1 ? AWARD_HIT_CNY : (isE3 ? AWARD_TASK_CNY : AWARD_TOOL_CNY), v.fp));
   }
   // 候选账已扫标记:整写(候选账非 append-only 证据面,是工作队列;已扫的行压缩掉防无限长大)
   const remain = [];
   for (const l of lines(CANDIDATES)) {
     let c; try { c = JSON.parse(l); } catch { continue; }
-    if (!seen.has(c.pred ?? c.path)) remain.push(l);
+    if (!seen.has(c.pred ?? c.path ?? c.task)) remain.push(l);
   }
   if (remain.length !== lines(CANDIDATES).length) atomicWrite(CANDIDATES, remain.length ? remain.join('\n') + '\n' : '');
   return out;

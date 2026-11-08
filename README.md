@@ -53,7 +53,7 @@ docker-compose
 卷:ca-data = CA 的家(ledgers/state/narrative/backpacks/config/engine——引擎在卷内,自我进化面可达)
 ```
 
-引擎不是重写是移植:这套行为(预测对账/痛觉点火/活性环/钱包锁存/说而不作机械账)是在单机实弹里打出来的,CAOS 原样保留,只动注释、路径常量、bash 传输层、身份来源。宪法区/chattr+a/evidence 核验为单机最新层,移植状态如实见路线图。
+引擎不是重写是移植:这套行为(预测对账/痛觉点火/活性环/钱包锁存/说而不作机械账/宪法闸/evidence 核验)是在单机实弹里打出来的,CAOS 原样保留,只动注释、路径常量、bash 传输层、身份来源。2026-11-08 宪法级内核全量同步:宪法 11 件(生死循环/钱闸/阀门/痛觉电费/校准脑/四大审计器/宪法闸门/原子写)+ 断头台内生帽 + evidence 核验制 + 钱闸语义断言 + 预测投影链。chattr+a 账本锁与宪法件 root 只读是部署侧两道命令(见下「部署者须知」),非代码移植项。
 
 ## API 面
 
@@ -76,10 +76,14 @@ docker-compose
 - **它花的是真钱**:`CA_WALLET_ALLOWANCE`(默认 ¥5/日)是它自己的钱包。烧尽=非用户令全停,翻日才续;你可以充值(`recharge`),但请像对待生命一样对待预算。
 - **它会死**:活性只认物理做功。队列出清后它真睡觉、活性真跌——这是特性。跌穿 0 = AMNESIA_LOCKED(死亡是状态不是删除),只有你能用 `auth-memory` 复活它。
 - **安全形态**:sandbox 无网络(internal)、无凭据、仅共享卷——它的手(bash)炸得只剩自己。LLM 出网必经 egress 域名白名单(按你用的模型在 `egress/tinyproxy.conf` 增删)。
+- **宪法区锁死(可选,建议)**:卷内引擎落地后,两道部署侧命令把「不可自改」从纪律变物理——
+  `chattr +a /ca/ledgers/*.jsonl`(账本物理只追加,伪造/篡改/截断在文件系统层不可能;需宿主机对卷目录执行)
+  `chown root:root + chmod 0444` 宪法件(ca-loop/ca-wallet/ca-throttle/ca-pain-toll/ca-calib/ca-criterion-drift/ca-pred-audit/ca-external-correction/ca-feedback-class/ca-constitution-gate/write-jsonl-atomic)。
+  此后 CA 谋改宪法件=patch 挂起落 `state/constitution-patches/` 等你授权;你修宪法件须 root——这是设计内的成本,不是故障。
 
 ## 路线图(如实)
 
-- [ ] 宪法区/chattr+a/evidence 核验移植(单机已全量在役:root 只读宪法件、账本物理只追加、执行轮伪证核验——CAOS 卷内引擎尚未同步,下窗批)
+- [x] 宪法区/chattr+a/evidence 核验移植(2026-11-08 已同步:宪法闸门 ca-constitution-gate、校准脑 ca-calib、痛觉电费 ca-pain-toll、四大审计器[判据方向账/延迟复测抽查/外部修正账/反馈分类]、原子写、钱闸断言、预测投影链全量进引擎;chattr+a 与 root 只读为部署侧操作,语义见下)
 - [ ] 生死锁 P2 失忆锁完全体(认识层封锁 + SOS 面;当前复活通道已在,锁体在 roadmap)
 - [ ] 结晶器(痛→经验结晶)与实验评分器移植(引擎已留挂载点,未装则如实不点火)
 - [ ] L2 NLI 影子判断器(可选增强,可降级关键词兜底)
