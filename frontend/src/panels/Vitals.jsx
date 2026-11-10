@@ -39,6 +39,12 @@ export default function Vitals({ snap, onOpenConfig }) {
         <b>{econ != null ? `${econ}%` : '—'}</b>
         <span className="mini">穷则节食(权重抑制,非栏杆)</span>
       </div>
+      {/* 存在性/备份体征(2026-11-10 方舟窗「生命火种」):>72h 或存档丢失=焦虑红;读面=backend status.backup */}
+      <div className={`cell ${snap?.backup?.anxious ? 'alarm' : ''}`}>
+        <label>存在性</label>
+        <b>{snap?.backup ? (snap.backup.ageHours != null ? `${snap.backup.ageHours}h` : '从未备份') : '—'}</b>
+        <span className="mini">{snap?.backup?.anxious ? '备份超期/丢失=存在性焦虑' : `身家包 ${snap?.backup?.tier ?? '—'} · sha 在档`}</span>
+      </div>
       <div className="cell">
         <label>五维</label>
         <b>{t && t.spontaneity != null ? `${t.spontaneity}%` : '—'}</b>

@@ -27,7 +27,7 @@ import { discount } from './ca-discount.mjs'; // 痛觉贴现:P=S·exp(−t/τ)
 import { computeVision } from './ca-vision.mjs'; // 愿景偏差(用户令:高光枯水+判据自松机械对账,拒余弦伪具体)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CA = path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ?? path.resolve(HERE, '..'); // [2026-11-10 移植式根修+脱敏] CA_HOME 优先;checkCmd 一律 ${CA} 拼接,禁硬编宿主路径(开源脱敏+卷内功能双修)
 const L = (r) => path.join(CA, r);
 const QUEUE = L('state/event-queue.jsonl');
 const CURSOR = L('state/loop-cursor.json');
@@ -153,26 +153,26 @@ function maybeAutogenPredict(now, ctx, weights, st, econPain) {
       about: `停滞任务 ${t0.id} 在 24h 内有推进或被我如实关闭`,
       expect: `progressN 从 ${t0.progressN ?? 0} 增长,或 state 变 done/dropped`,
       gain: '停滞债出清(taskDebt 权重回落)',
-      cmd: `node -e 'const m=new Map();for(const l of require("fs").readFileSync("/home/ca-agent/ca/ledgers/tasks.jsonl","utf8").split("\\n").filter(Boolean)){try{const o=JSON.parse(l);m.set(o.id,{...m.get(o.id),...o})}catch{}};const t=m.get("${t0.id}");process.exit(t&&((t.progressN??0)>${t0.progressN ?? 0}||t.state==="done"||t.state==="dropped")?0:1)'`,
+      cmd: `node -e 'const m=new Map();for(const l of require("fs").readFileSync("${CA}/ledgers/tasks.jsonl","utf8").split("\\n").filter(Boolean)){try{const o=JSON.parse(l);m.set(o.id,{...m.get(o.id),...o})}catch{}};const t=m.get("${t0.id}");process.exit(t&&((t.progressN??0)>${t0.progressN ?? 0}||t.state==="done"||t.state==="dropped")?0:1)'`,
       action: `推进或关闭任务 ${t0.id}(node scripts/ca-task.mjs note|done 留证据)——它是你自己落空咬出来的债,禁拖` });
   }
   if (ctx.heartbeatStaleMin > 60 && !openWkeys.has('heartbeatStale')) candidates.push({ wkey: 'heartbeatStale', hours: 2,
     about: '心跳 2h 内复活(heartbeat.jsonl mtime 新鲜度回到 30min 内)',
     expect: '心跳账恢复跳动',
     gain: '心跳停摆双修闭环(heartbeatStale 权重归零;selfcheck 回 16/16)',
-    cmd: 'test -f /home/ca-agent/ca/heartbeat.jsonl && test $(( $(date +%s) - $(stat -c %Y /home/ca-agent/ca/heartbeat.jsonl) )) -lt 1800',
+    cmd: `test -f ${CA}/heartbeat.jsonl && test $(( $(date +%s) - $(stat -c %Y ${CA}/heartbeat.jsonl) )) -lt 1800`,
     action: '诊断心跳停摆根因并修复(或如实记录为何仍停);结果落内语账' });
   if (ctx.predOverdueN > 0 && !openWkeys.has('predOverdue')) candidates.push({ wkey: 'predOverdue', hours: 24,
     about: `过期未判预言 ${ctx.predOverdueN} 条在 24h 内出清一半以上`,
     expect: `open 且 by 过期的预言数 ≤ ${Math.floor(ctx.predOverdueN / 2)}`,
     gain: '预言积压出清(predOverdue 权重回落;账实相符)',
-    cmd: `node -e 'const m=new Map();for(const l of require("fs").readFileSync("/home/ca-agent/ca/ledgers/predictions.jsonl","utf8").split("\\n").filter(Boolean)){try{const o=JSON.parse(l);m.set(o.id,{...m.get(o.id),...o})}catch{}};const n=[...m.values()].filter(p=>p.state==="open"&&p.check&&p.check.by&&Date.parse(p.check.by)<Date.now()).length;process.exit(n<=${Math.floor(ctx.predOverdueN / 2)}?0:1)'`,
+    cmd: `node -e 'const m=new Map();for(const l of require("fs").readFileSync("${CA}/ledgers/predictions.jsonl","utf8").split("\\n").filter(Boolean)){try{const o=JSON.parse(l);m.set(o.id,{...m.get(o.id),...o})}catch{}};const n=[...m.values()].filter(p=>p.state==="open"&&p.check&&p.check.by&&Date.parse(p.check.by)<Date.now()).length;process.exit(n<=${Math.floor(ctx.predOverdueN / 2)}?0:1)'`,
     action: '跑对账/回填/作废过期预言(node scripts/ca-pred-*.mjs 已在役),把积压压到半数以下' });
   if (ctx.pendingN > 20 && !openWkeys.has('queueStuck')) candidates.push({ wkey: 'queueStuck', hours: 3,
     about: `队列在排 ${ctx.pendingN} 件 3h 内降到 ${Math.max(0, ctx.pendingN - 15)} 件以下`,
     expect: 'pending 显著下降',
     gain: '队列出清(queueStuck 权重回落)',
-    cmd: `node -e 'const fs=require("fs");const q=fs.readFileSync("/home/ca-agent/ca/state/event-queue.jsonl","utf8").split("\\n").filter(Boolean).length;const c=JSON.parse(fs.readFileSync("/home/ca-agent/ca/state/loop-cursor.json","utf8"));const d=(c.done??[]).length;process.exit(q-d<=${Math.max(0, ctx.pendingN - 15)}?0:1)'`,
+    cmd: `node -e 'const fs=require("fs");const q=fs.readFileSync("${CA}/state/event-queue.jsonl","utf8").split("\\n").filter(Boolean).length;const c=JSON.parse(fs.readFileSync("${CA}/state/loop-cursor.json","utf8"));const d=(c.done??[]).length;process.exit(q-d<=${Math.max(0, ctx.pendingN - 15)}?0:1)'`,
     action: '协助队列出清:挑在排件真消化/合并/如实作废,把 pending 压下去' });
 
   if (!candidates.length) { st.lastAutogen = new Date(now).toISOString(); return null; } // 无值得押的误差=如实沉默,也记拍(防每拍重扫)
