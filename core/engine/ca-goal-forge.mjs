@@ -11,7 +11,11 @@
 // 用法:node scripts/ca-goal-forge.mjs --kind <wkey> [--context '<json>'] [--json]
 import { readFileSync, appendFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createTask, staleTasks } from './ca-task.mjs';
+import { exploreGate, pickExploreTask } from './ca-proactive.mjs'; // 探索权闸+账面选题(2026-11-09 最高令;单源 ca-proactive)
+import { freedom, loadRegistry } from './ca-homeostasis.mjs'; // 钱包读数(生存墙投影,同步读)+注册表(北星双正常闸读 safe 档)
+import { forgeTarget, POOL_FILE } from './ca-evolution.mjs'; // 北极星势差(2026-11-10 Eagle 最高架构令):双正常时最高优先级目标单源
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
@@ -44,6 +48,25 @@ function buildGoal(kind, ctx, now) {
         expect: `${t0.id} progressN 从 ${t0.progressN ?? 0} 增长,或 state 变 done/dropped`,
         cmd: NODEQ(`const m=new Map();for(const l of require("fs").readFileSync("${TASKS}","utf8").split("\\n").filter(Boolean)){try{const o=JSON.parse(l);m.set(o.id,{...m.get(o.id),...o})}catch{}};const t=m.get("${t0.id}");process.exit(t&&((t.progressN??0)>${t0.progressN ?? 0}||t.state==="done"||t.state==="dropped")?0:1)`),
         by: H(24), failCondition: '到期 progressN 零增长且未关闭',
+      };
+    }
+    case 'explore': {
+      // 探索权(2026-11-09 最高令):无债+低疲劳+钱包≥20%(硬地板)+日额度——闸单源 ca-proactive.exploreGate(双保险第二道)
+      let eg = { ok: false, why: 'gate-error' };
+      try {
+        const wpS = freedom({ maxAgeMs: 60_000 })?.signals?.energy_wallet_pct;
+        const spent = (() => { try { const b = JSON.parse(readFileSync(L('state/explore-budget.json'), 'utf8')); const d = new Date(now).toISOString().slice(0, 10); return b?.date === d ? b.spawns : 0; } catch { return 0; } })();
+        eg = exploreGate({ walletPct: Number(wpS?.value), pendingN: ctx.pendingN ?? 0, fatigue: ctx.fatigue ?? 0, spawns: spent });
+      } catch (e) { eg = { ok: false, why: String(e).slice(0, 60) }; }
+      if (!eg.ok) return null;
+      const pickPool = pickExploreTask(); // 神经重塑令(2026-11-09 最高令):翻结晶背包+历史账本机械选题——表达欲由真发现的物理事实驱动,禁凭空捏造
+      const pickE = (pickPool[0] ?? { goal: '探索·自查:复盘近 7 日账本,找一件有建设性的事做并汇报', why: '兜底' });
+      return {
+        bindPainId: 'explore-day',
+        goal: pickE.goal, // 账面选题(含 why 溯源)
+        expect: '探索任务有物理进展(progressN 增长或 done),或如实 dropped 附原因——探索也是债,不白花电费',
+        cmd: NODEQ(`const fs=require("fs");const ls=fs.readFileSync("${TASKS}","utf8").split("\\n").filter(Boolean);for(const l of ls){try{const o=JSON.parse(l);if(String(o.origin??"").startsWith("forge:explore")&&(o.state==="done"||(o.progressN??0)>0)){process.exit(0)}}catch{}}process.exit(1)`),
+        by: H(48), failCondition: '到期探索任务零进展且未关闭(探索欠账也进断头台)',
       };
     }
     case 'queueStuck': {
@@ -106,9 +129,9 @@ function buildGoal(kind, ctx, now) {
       return {
         bindPainId: 'dream-debt',
         goal: `休眠巩固:整理 ${n} 件未巩固事件(叙事→义务+活叙事+压缩旧账),产出 [自驱] 承诺与可机械验证预言`,
-        expect: 'ignite.json dreamCount 回落(巩固发生)',
-        cmd: NODEQ(`const s=JSON.parse(require("fs").readFileSync("${IGNITE}","utf8"));process.exit((s.dreamCount??0)<${n}?0:1)`),
-        by: H(12), failCondition: '到期 dreamCount 未回落',
+        expect: 'ignite.dreamCount 恒等于 deriveDebt().backlogOpen 且近 6h 有 dream-consolidation',
+        cmd: `node "${path.join(HERE, 'ca-dream-debt-assert.mjs')}"`,
+        by: H(12), failCondition: '到期 dreamCount 与派生积压漂移或 6h 无巩固记录',
       };
     }
     case 'dirty': return {
@@ -142,6 +165,31 @@ function buildGoal(kind, ctx, now) {
         by: H(6), failCondition: '到期无新做功行',
       };
     }
+    case 'evolution': {
+      // 北极星势差(2026-11-10 Eagle 最高架构令):当生存差(钱包)与效率差(任务)都正常时,
+      //   GoalForge 最高优先级目标必须来源于 evolution_gap——给最弱维派一件「过去做不到」的跨域任务。
+      //   闸=双正常才锻(竞争面 econSupp 已压生存差;此处锻造器内第二道独立闸,读注册表 safe 档,不写死数)。
+      //   铁律入文案:头衔扮演不缩势差反涨(嘴炮税);物理判据=进度池 wins 计数增长(recordWin 落账),
+      //   也就是说「学会了」本身不可判,「留下证据且过校验」才可判。
+      try {
+        const f = freedom({ maxAgeMs: 60_000 });
+        const reg = loadRegistry();
+        const wallet = Number(f?.signals?.energy_wallet_pct?.value);
+        const openN = Number(f?.signals?.narrative_open_tasks?.value);
+        const walletSafe = Number(reg?.energy_wallet_pct?.safe ?? 25), taskSafe = Number(reg?.narrative_open_tasks?.safe ?? 6);
+        if (!Number.isFinite(wallet) || wallet < walletSafe) return null; // 生存差没解决=北星让位(先活着)
+        if (!Number.isFinite(openN) || openN > taskSafe) return null;    // 效率差没解决=北星让位(先还债)
+        const t = forgeTarget();
+        if (!t || !t.drill) return null;
+        return {
+          bindPainId: 'evolution-gap',
+          goal: `北星进化(势差 ${t.gap},最弱维「${t.label}」${t.dimGap}):${t.drill}——解决一件过去做不到的任务,留物理代码证据并过物理校验,然后 node scripts/ca-evolution.mjs --record-win 落账(势差缩 0.1)。铁律:宣称「已是硅基生命」不缩势差反涨(嘴炮税);没有物理证据=没有进化`,
+          expect: `evolution-pool.json wins ≥ ${t.wins + 1} 且势差 < ${t.gap}`,
+          cmd: NODEQ(`const p=JSON.parse(require("fs").readFileSync("${POOL_FILE()}","utf8"));process.exit((p.wins?.length??0)>=${t.wins + 1}?0:1)`),
+          by: H(72), failCondition: '到期无新物理证据胜绩(wins 未增)且未如实 dropped——势差不因空谈而缩',
+        };
+      } catch { return null; }
+    }
     default: return null;
   }
 }
@@ -171,6 +219,12 @@ function main() {
   const g = buildGoal(kind, ctx, now);
   if (!g || !g.bindPainId) { console.log(JSON.stringify({ forged: false, skipped: 'no-pressure-or-unbound', kind })); return; } // 不绑痛=作废
 
+  // 可达性预检(2026-11-08 用户令):锻件前先跑判据——exit0=判据当下已成立,任务无意义(19:38 案 6406 token 烧在已达标件上)→不锻;
+  //   非0=当下确需自救,照锻。结构性坏判据由 ca-task 出生预检拦(双层)。
+  try {
+    const pre = spawnSync('/bin/bash', ['-c', String(g.cmd)], { encoding: 'utf8', timeout: 30_000 });
+    if (pre.status === 0) { console.log(JSON.stringify({ forged: false, skipped: 'check-pre-passed', kind, cmd: String(g.cmd).slice(0, 100) })); return; }
+  } catch { /* 预检坏不挡锻件 */ }
   const goal = {
     kind, bind_pain_id: g.bindPainId, goal: g.goal, expect: g.expect,
     check: { cmd: g.cmd, by: g.by }, failCondition: g.failCondition,
@@ -191,4 +245,4 @@ function main() {
   console.log(JSON.stringify({ forged: true, kind, task: tid, event: ev.id, bind_pain_id: g.bindPainId }));
 }
 
-main();
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) main();

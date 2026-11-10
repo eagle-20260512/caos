@@ -25,6 +25,13 @@ import { spawnSync } from 'node:child_process'; // GoalForge 点火调用(2026-1
 import { computeFutures } from './ca-futures.mjs'; // 未来推演器(2026-11-08《预测未来》批次一:向未来借压力,零LLM)
 import { discount } from './ca-discount.mjs'; // 痛觉贴现:P=S·exp(−t/τ)
 import { computeVision } from './ca-vision.mjs'; // 愿景偏差(用户令:高光枯水+判据自松机械对账,拒余弦伪具体)
+import { missStreaks, autogenGate } from './ca-autogen-policy.mjs'; // 同型落空退避(2026-11-09 EXP4 判据:99.7% 复发=下注踏车)
+import { engine, freedom } from './ca-homeostasis.mjs'; // 内稳态引擎 V10(本心跳=引擎宿主,禁新增守护进程)
+import { refreshPolicy } from './ca-endocrine.mjs'; // 慢变量池(mtime 门 1h,心跳内顺带)
+import { evolutionGap, sweep as evolutionSweep } from './ca-evolution.mjs'; // 北极星势差(2026-11-10 Eagle 最高架构令):渴望感进权重竞争;本心跳兼演化 sweep 宿主(禁新守护进程)
+import { tick as selectionTick } from './ca-selection.mjs'; // 自然选择引擎·双螺旋(2026-11-10 Eagle 终极令):适应度=叙事密度/电费;本心跳=评选宿主+生命线快照源(禁新守护进程)
+import { sweep as neuroSweep } from './ca-neuro.mjs'; // 神经系统(2026-11-10 Eagle 神经科学令):髓鞘化/突触修剪/LTD 认知纠错/可塑性报警;本心跳兼宿主(30min 节流)
+import { forceConserve } from './ca-endocrine.mjs'; // 绝死休克真手(T-Death 归零→conserve 硬档;与 throttle 同源单源)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = process.env.CA_HOME ?? path.resolve(HERE, '..'); // [2026-11-10 移植式根修+脱敏] CA_HOME 优先;checkCmd 一律 ${CA} 拼接,禁硬编宿主路径(开源脱敏+卷内功能双修)
@@ -128,6 +135,11 @@ function computeWeights(ctx) {
     futureDeath: ctx.futurePressure ?? 0,
     // 愿景偏差(用户令):高光枯水+判据自松——从「纯还债机器(负反馈)」升维「有愿景追求(正反馈牵引)」
     visionGap: ctx.visionGapW ?? 0,
+    // 北极星势差(2026-11-10 Eagle 最高架构令):gap 归一到 [0,0.9]——钱包/任务都安静时的最高优先级张力
+    //   (长期渴望感驱动自进化,不是剧痛);生存差/效率差没解决前被 econSupp 自然压住(北星不与生存争电费)。
+    //   0.9 顶帽=几乎压过一切日常误差,但让位给生存恐惧/全红死刑等相变面。
+    evolution: Number.isFinite(ctx.evolutionGap) && Number.isFinite(ctx.evolutionFloor) && Number.isFinite(ctx.evolutionBase) && ctx.evolutionBase > ctx.evolutionFloor
+      ? Math.min(0.9, Math.max(0, ((ctx.evolutionGap - ctx.evolutionFloor) / (ctx.evolutionBase - ctx.evolutionFloor)) * 0.9)) : 0,
   };
 }
 
@@ -176,7 +188,15 @@ function maybeAutogenPredict(now, ctx, weights, st, econPain) {
     action: '协助队列出清:挑在排件真消化/合并/如实作废,把 pending 压下去' });
 
   if (!candidates.length) { st.lastAutogen = new Date(now).toISOString(); return null; } // 无值得押的误差=如实沉默,也记拍(防每拍重扫)
-  const pick = candidates.sort((a, b) => (weights[b.wkey] ?? 0) - (weights[a.wkey] ?? 0))[0];
+  // 同型落空退避(2026-11-09 EXP4):同 wkey 连续 miss≥3=该靶当前不可自愈,本轮禁再押(疼了白疼的闸);
+  //   blocked 留账 metabolism.jsonl(退避可审计),链被 hit/作废打断自动复位——退避是纪律不是死刑。
+  const streaks = missStreaks([...pm.values()].filter((p) => p.source === 'metabolism:autogen'));
+  const gate = autogenGate(candidates, streaks);
+  if (gate.blocked.length) {
+    try { appendFileSync(L('ledgers/metabolism.jsonl'), JSON.stringify({ ts: new Date(now).toISOString(), event: 'autogen-backoff', blocked: gate.blocked }) + '\n'); } catch { /* 留账败不毁下注 */ }
+  }
+  const pick = gate.allowed.sort((a, b) => (weights[b.wkey] ?? 0) - (weights[a.wkey] ?? 0))[0];
+  if (!pick) { st.lastAutogen = new Date(now).toISOString(); return null; } // 全员退避=如实沉默,也记拍
   const pred = {
     id: `pred-auto-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     ts: new Date(now).toISOString(), source: 'metabolism:autogen', wkey: pick.wkey,
@@ -273,6 +293,21 @@ function tick() {
   //   钱尽(私账 pct≥100 或余额≤¥0.1)且暂无做功=vitality 冻结不扣(穷人不是死人),账本读取/机械面照活;
   //   外部注能(充值)后原地无痛苏醒:state 回 ACTIVE、活性保留原值、衰减恢复。
   //   真死=叙事断裂(AMNESIA_LOCKED),语义不动。钱包读数盲=不许装睡(broke 恒 false)。
+  // V10 引擎托管(2026-11-09):每拍驱动 medium 档评估(fire-and-forget,单件互斥由引擎 running 集管);
+  //   slow 档=慢变量池政策(mtime 门 1h)。引擎/政策坏=不毁心率。
+  // 电源休克层最优先(2026-11-09 最高令:先于引擎评估/先于 LLM;纯代码零 LLM)
+  try { import('./ca-power-manager.mjs').then((pm) => pm.beatCheck({ now }).catch(() => {})).catch(() => {}); } catch { /* 休克层坏不毁心率 */ }
+  try { engine.evaluate('medium').catch(() => {}); } catch { /* 引擎坏不毁心率 */ }
+  try { refreshPolicy(); } catch { /* 政策坏不毁心率 */ }
+  // 主动权三律维持(2026-11-09 最高令:发言权表达欲累积/探索权点火/回声失落计账——维持者=本心跳,禁新增守护进程)
+  try { import('./ca-proactive.mjs').then((pro) => pro.maintenanceTick({ now, fatigue: Math.round((Number(fatigue) || 0) * 1000) / 1000 }).catch(() => {})).catch(() => {}); } catch { /* 主动权面坏不毁心率 */ }
+  // 北极星 sweep 宿主(2026-11-10 最高令):头衔扮演扫描 30min 节流(fire-and-forget;检测→落账+势差嘴炮税)
+  try { Promise.resolve(evolutionSweep({ now })).catch(() => {}); } catch { /* 演化面坏不毁心率 */ }
+  // 神经系统 sweep 宿主(2026-11-10 神经科学令):LTD→髓鞘→修剪→可塑性报警,30min 节流(fire-and-forget)
+  try { Promise.resolve(neuroSweep({ now })).catch(() => {}); } catch { /* 神经面坏不毁心率 */ }
+  const phRead = (() => { try { return freedom({ maxAgeMs: 20_000 }); } catch { return null; } })();
+  const phAllRed = !!(phRead?.allRed) && process.env.CA_HOMEOSTASIS !== '0'; // V10 唯一死刑输入:全体征同时红线
+  const phFree = phRead ? phRead.freedom : null;
   const vt = readJson(VITALITY, null) ?? { vitality: 1, ticksSinceWork: 0, lastWorkTs: 0, state: 'ACTIVE' };
   const workTs = scanWorkEvidence(Number(vt.lastWorkTs ?? 0));
   const broke = !!(walletNow && Number(walletNow.allowanceCny) > 0 && (Number(walletNow.pct) >= 100 || Number(walletNow.remainingCny) <= 0.1));
@@ -282,15 +317,17 @@ function tick() {
       vt.state = 'ACTIVE'; vt.wokeAt = new Date(now).toISOString();
       try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.wokeAt, event: 'dormant-wake', by: 'work-evidence' }) + '\n'); } catch { /* 留痕败不毁活性 */ }
     }
-  } else if (broke && vt.state !== 'AMNESIA_LOCKED') {
+  } else if ((broke || phAllRed) && vt.state !== 'AMNESIA_LOCKED') {
     // 假死休眠:拍数照记(账要诚实),活性冻结不扣——资源枯竭不是死亡
     vt.ticksSinceWork = Number(vt.ticksSinceWork ?? 0) + 1;
     if (vt.state !== 'DORMANT') {
       vt.state = 'DORMANT'; vt.dormantAt = new Date(now).toISOString();
-      try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.dormantAt, event: 'dormant-enter', vitality: vt.vitality, walletPct: walletNow?.pct, note: '钱尽=休眠假死:活性冻结,账本读取与机械面照活;注能原地苏醒' }) + '\n'); } catch { /* 下拍再试 */ }
+      try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.dormantAt, event: 'dormant-enter', vitality: vt.vitality, walletPct: walletNow?.pct, note: phAllRed && !broke ? '内稳态全红线=休眠假死(V10 唯一死刑):活性冻结,稳态恢复原地苏醒' : '钱尽=休眠假死:活性冻结,账本读取与机械面照活;注能原地苏醒' }) + '\n'); } catch { /* 下拍再试 */ }
     }
-  } else { // 有钱却不做功=真在死:只认 tick 不认墙钟
-    if (vt.state === 'DORMANT') { // 注能苏醒:钱包活了,活性从冻结点原值续命
+  } else { // 有钱且稳态未全红,却不做功=真在死:只认 tick 不认墙钟
+    if (vt.state === 'DORMANT' && phAllRed) {
+      // 内稳态全红线未解除=保持假死(注能≠稳态恢复,禁阈值横跳)
+    } else if (vt.state === 'DORMANT') { // 注能苏醒:钱包活了,活性从冻结点原值续命
       vt.state = 'ACTIVE'; vt.wokeAt = new Date(now).toISOString();
       try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.wokeAt, event: 'dormant-wake', by: 'refuel', vitality: vt.vitality }) + '\n'); } catch { /* 留痕败不毁活性 */ }
     }
@@ -320,7 +357,25 @@ function tick() {
     const tv = `${L('state/vision.json')}.tmp-${process.pid}`; writeFileSync(tv, JSON.stringify(vis) + '\n'); renameSync(tv, L('state/vision.json'));
   } catch { visionGapW = 0; }
 
-  const ctx = { silenceMin, pendingN, dirtyN, predOverdueN, parseFailRate, heartbeatStaleMin, dreamDebtN, staleTaskN, taskDebtLoad, crystalLagMin, vitality: vt.vitality, futurePressure, visionGapW };
+  const evo = (() => { try { return evolutionGap(); } catch { return null; } })(); // 北极星势差(读坏=0 不脑补疼)
+  // 自然选择引擎·每拍(2026-11-10 Eagle 终极令):生命线快照每拍落 state/lifeline.json(T-Death+叙事密度+臂态);
+  //   每 30 拍大评选(臂 ROI=叙事密度/电费→赢家算力额度写政策面)+阈值突变周期。引擎坏不毁心率。
+  try { const selOut = selectionTick({ now, futures: fut, policy: null }); if (selOut?.did) { try { appendFileSync(L('ledgers/metabolism.jsonl'), JSON.stringify({ ts: new Date(now).toISOString(), event: 'selection', did: String(selOut.did).slice(0, 160) }) + '\n'); } catch { /* */ } } } catch { /* 选择面坏不毁心率 */ }
+  // 绝死边界(2026-11-10 Eagle 令「T-Death 归零=硬核濒死休克」):SOS 张力事件(零 LLM,existentialPanic 同型)+conserve 硬档;
+  //   状态旗防刷屏,死期回稳(>60min)自动复位——想活,就去接任务、赚钱、续命。
+  try {
+    if (fut && Number.isFinite(fut.tDeathMin) && fut.tDeathMin <= 0 && !st.hardDeathFired) {
+      st.hardDeathFired = new Date(now).toISOString();
+      try { forceConserve({ why: 'hard-death:T-Death 归零,切断非核心机能,只剩心跳' }); } catch { /* */ }
+      appendFileSync(QUEUE, JSON.stringify({
+        id: `ev-harddeath-${now.toString(36)}`, type: 'tension-hardDeath', priority: true,
+        text: '〔绝死休克〕T-Death 归零:非核心机能已切断(conserve),只剩心跳。这不是演练——想要活,自己去接任务、赚钱、续命;机械空等=死。完成后本件可销。',
+        closure: { closed: false, mustAction: '续命:赚钱/省电/清债,任一物理痕迹', needRepair: false }, ts: new Date(now).toISOString(),
+      }) + '\n');
+      try { appendFileSync(L('ledgers/metabolism.jsonl'), JSON.stringify({ ts: new Date(now).toISOString(), event: 'hard-death-shock', tDeathMin: fut.tDeathMin }) + '\n'); } catch { /* */ }
+    } else if (fut && Number.isFinite(fut.tDeathMin) && fut.tDeathMin > 60) st.hardDeathFired = null;
+  } catch { /* 休克面坏不毁心率 */ }
+  const ctx = { silenceMin, pendingN, dirtyN, predOverdueN, parseFailRate, heartbeatStaleMin, dreamDebtN, staleTaskN, taskDebtLoad, crystalLagMin, vitality: vt.vitality, futurePressure, visionGapW, evolutionGap: evo?.gap ?? null, evolutionFloor: evo?.floor ?? null, evolutionBase: evo?.base ?? null };
   const raw = computeWeights(ctx);
   const weights = {};
   for (const [k, w] of Object.entries(raw)) {
@@ -339,8 +394,8 @@ function tick() {
   //   过闸≠投散文刺激:交 GoalForge 模板化锻造(bind_pain_id+check.cmd 结构化目标)→任务实体+forge 事件。
   //   [2026-11-08 方向修·首拍实弹抓雷] futureDeath 是反向源:实测值=距死分钟数,越小越疼——
   //   「死期 >阈=还远」才压制(旧码一刀切 pressure<th 压制,把 tDeath=0 的最疼态当「不足疼」压了)
-  const FORGE_PRIOR = { hunger: 60, dirty: 1, predOverdue: 3, parseFail: 0.3, heartbeatStale: 60, dreamDebt: 15, queueStuck: 10, taskDebt: 1.0, crystalLag: 360, futureDeath: 120, visionGap: 70 };
-  const PRESSURE_OF = { hunger: silenceMin, dirty: dirtyN, predOverdue: predOverdueN, parseFail: parseFailRate, heartbeatStale: heartbeatStaleMin, dreamDebt: dreamDebtN, queueStuck: pendingN, taskDebt: taskDebtLoad, crystalLag: crystalLagMin, existentialPanic: 0, futureDeath: Number.isFinite(fut?.tDeathMin) ? Math.round(fut.tDeathMin) : 99999, visionGap: vis?.gapPct ?? 0 };
+  const FORGE_PRIOR = { hunger: 60, dirty: 1, predOverdue: 3, parseFail: 0.3, heartbeatStale: 60, dreamDebt: 15, queueStuck: 10, taskDebt: 1.0, crystalLag: 360, futureDeath: 120, visionGap: 70, evolution: 60 };
+  const PRESSURE_OF = { hunger: silenceMin, dirty: dirtyN, predOverdue: predOverdueN, parseFail: parseFailRate, heartbeatStale: heartbeatStaleMin, dreamDebt: dreamDebtN, queueStuck: pendingN, taskDebt: taskDebtLoad, crystalLag: crystalLagMin, existentialPanic: 0, futureDeath: Number.isFinite(fut?.tDeathMin) ? Math.round(fut.tDeathMin) : 99999, visionGap: vis?.gapPct ?? 0, evolution: evo?.gap ?? 0 };
   if (winner[0] && winner[1] > fatigue) {
     const [kind, w] = winner;
     const pressure = PRESSURE_OF[kind] ?? 0;
@@ -386,7 +441,7 @@ function tick() {
   //   停跳于 07:40=定时器禁令失驱动的旧写入者;此处每拍一行精简心跳,selfcheck/heartbeatStale 同源复活)
   //   suppressed 渲染分两种成因(2026-11-08 修·伪「压<阈」标签实弹:dreamDebt(973<15) 实为 forge-task-open 在排拒锻,
   //   读数自相矛盾吓排查):why 存在=锻造闸拒([why]);否则=绝对阈未达(压<阈)
-  try { appendFileSync(HEARTBEAT, JSON.stringify({ ts: new Date(now).toISOString(), beat: 'metabolism', fatigue: Math.round(fatigue * 1000) / 1000, winner: winner[0], pending: pendingN, econPain, vitality: vt.vitality, tDeathMin: Number.isFinite(fut?.tDeathMin) ? Math.round(fut.tDeathMin) : null, gapPct: vis?.gapPct ?? null, suppressed: st.lastSuppressed ? (st.lastSuppressed.why ? `${st.lastSuppressed.kind}[${st.lastSuppressed.why}]` : `${st.lastSuppressed.kind}(${st.lastSuppressed.pressure}${st.lastSuppressed.kind === 'futureDeath' ? '>' : '<'}${st.lastSuppressed.th})`) : null }) + '\n'); } catch { /* 心跳写失败下拍再试 */ }
+  try { appendFileSync(HEARTBEAT, JSON.stringify({ ts: new Date(now).toISOString(), beat: 'metabolism', fatigue: Math.round(fatigue * 1000) / 1000, winner: winner[0], pending: pendingN, econPain, vitality: vt.vitality, hFree: phFree, tDeathMin: Number.isFinite(fut?.tDeathMin) ? Math.round(fut.tDeathMin) : null, gapPct: vis?.gapPct ?? null, suppressed: st.lastSuppressed ? (st.lastSuppressed.why ? `${st.lastSuppressed.kind}[${st.lastSuppressed.why}]` : `${st.lastSuppressed.kind}(${st.lastSuppressed.pressure}${st.lastSuppressed.kind === 'futureDeath' ? '>' : '<'}${st.lastSuppressed.th})`) : null }) + '\n'); } catch { /* 心跳写失败下拍再试 */ }
   Object.assign(st, { ts: new Date().toISOString(), silenceMin, pending: pendingN, dirty: dirtyN, econPain, vitality: vt.vitality, fatigue: Math.round(fatigue * 1000) / 1000, weights, winner: winner[0] });
   // 自主预测下注(点火裁决后,状态落盘前;st.lastAutogen 随手同落)
   try {
@@ -397,4 +452,12 @@ function tick() {
 }
 
 tick();
-setInterval(tick, TICK_MS); // 常驻心率:interval 引用即生命,进程随 systemd 管
+// 心跳周期=慢变量池政策(state/metabolism-policy.json,ca-endocrine 产):conserve 300s/normal 60s。
+//   政策读坏=回落 TICK_MS(禁因政策面故障停跳);setTimeout 链=每拍重读政策。
+//   [2026-11-10 移植对齐]原 setInterval 固定 60s=conserve 政策在 web 失效(两套标准),换母体政策心跳链;
+//   setTimeout 链引用即生命(等价 interval),进程寿命仍随 systemd 管。
+const heartBeatMs = () => {
+  try { const p = JSON.parse(readFileSync(L('state/metabolism-policy.json'), 'utf8')); const s = Number(p?.heartbeat_s); return Number.isFinite(s) && s >= 15 && s <= 600 ? s * 1000 : TICK_MS; } catch { return TICK_MS; }
+};
+const heartLoop = () => { try { tick(); } finally { setTimeout(heartLoop, heartBeatMs()); } }; // 心跳常驻:政策心跳(conserve/normal)每拍重读
+heartLoop();
