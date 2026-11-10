@@ -3,10 +3,10 @@ import React, { useEffect, useState } from 'react';
 // 代谢面:注意力权重竞争实时流(winner/全体权重)+ 内语尾窗
 // 权重键中文化(数据键是引擎内语,展示层翻译,不改账)
 const ZH = {
-  hunger: '饥饿', dirty: '脏账', predOverdue: '预言逾期', parseFail: '解析失败',
+  hunger: '饥饿', dirty: '脏账', predDirty: '预言残行', predOverdue: '预言逾期', parseFail: '解析失败',
   heartbeatStale: '心跳失联', dreamDebt: '梦债', queueStuck: '队列卡死',
   taskDebt: '任务欠账', crystalLag: '结晶滞后', existentialPanic: '存亡恐慌',
-  futureDeath: '死期', visionGap: '愿景',
+  futureDeath: '死期', visionGap: '愿景', evolution: '北星',
 };
 const zh = (k) => ZH[k] ?? k;
 
