@@ -20,6 +20,7 @@ const fmtTs = (t) => String(t ?? '').slice(11, 19);
 const BRANCH_TONE = { 探查: 'yellow', 试探: 'purple', 确定: 'green' };
 const REVIEW_TONE = { continue: 'purple', close: 'blue', fail: 'red' };
 const LESSON_LABEL = { scar: '毒打疤', 'parse-fail': '解析毒打', 'gate-reject': '闸拒疤', closed: '闭环', reinforce: '受赏', 'exp-conflict': '经验冲突疤' };
+const P5 = [['red', '红', '248,81,73'], ['blue', '蓝', '88,166,255'], ['green', '绿', '63,185,80'], ['social', '社交', '188,140,255'], ['risk', '风险', '210,105,30']];
 
 const tagsOf = (t) => {
   const out = [];
@@ -85,8 +86,36 @@ function SlotsGrid({ slots }) {
   );
 }
 
+// 心跳·现拍条(常驻,2026-11-17 Eagle 令「红蓝绿没数值=没活,数值随内外刺激不断变化,像人的心跳」):
+//   不选真轮也见活体现值;心跳年龄>5min=停跳嫌疑亮牌(心跳停没停,页上一眼可见)。
+function LiveStrip({ live }) {
+  const P = live?.p?.P ?? null;
+  const age = live?.p?.ts ? Math.max(0, Math.round((Date.now() - Date.parse(live.p.ts)) / 1000)) : null;
+  const stale = age != null && age > 300;
+  return (
+    <div className="console">
+      <div className={`control-row ${stale ? 'hb-stale' : ''}`} style={stale ? { borderColor: 'var(--tr-red)' } : null}>
+        <div className="control-label">心跳·现拍</div>
+        {!live && <span className="dim">读取现拍…</span>}
+        {live && P && <>
+          {P5.map(([k, l, rgb]) => (
+            <span key={k} style={{ display: 'inline-block', marginRight: 12, fontSize: 13 }}>
+              <i style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 8, background: `rgb(${rgb})`, marginRight: 4, opacity: 0.85 }} />
+              {l}:<b>{typeof P[k] === 'number' ? P[k].toFixed(3) : '—'}</b>
+            </span>
+          ))}
+          <span className="dim" style={{ marginLeft: 8 }}>{live.p.dominant ? `主导:${live.p.dominant}` : '无主导'}{live.hormone?.T ? ` · 张力:${live.hormone.T}` : ''}</span>
+          <span className="dim" style={{ marginLeft: 8 }}>{age}s 前{stale ? ' ⚠️ >5min——心跳停跳嫌疑(环死/睡眠?如实亮牌)' : ''}</span>
+        </>}
+        {live && !P && <span className="dim">（账面无 pvector 拍——环未起,如实空）</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function Trace({ onClose }) {
   const [turns, setTurns] = useState(null);
+  const [live, setLive] = useState(null);     // 心跳·现拍(常驻)
   const [active, setActive] = useState(null);
   const [chain, setChain] = useState(null);   // 七层真账(/api/trace/:id)
   const [ring, setRing] = useState(null);     // 判执环真账(/api/trace/:id/loop:rounds/mindRows/lessons)
@@ -98,6 +127,14 @@ export default function Trace({ onClose }) {
   const esRef = useRef(null);
   const runRef = useRef(false);
   const termRef = useRef(null);
+
+  useEffect(() => {
+    let dead = false;
+    const pull = async () => { try { const j = await (await fetch('/api/vitals/live')).json(); if (!dead) setLive(j); } catch { /* 心跳面断=条上如实 */ } };
+    pull();
+    const t = setInterval(pull, 15000);
+    return () => { dead = true; clearInterval(t); };
+  }, []);
 
   useEffect(() => {
     let dead = false;
@@ -207,6 +244,8 @@ export default function Trace({ onClose }) {
         </div>
       </div>
 
+      <LiveStrip live={live} />
+
       {err && <div className="trace-err">追踪面异常:{err}(缺账=如实,不造演示数据)</div>}
 
       <div className="pipeline">
@@ -226,7 +265,7 @@ export default function Trace({ onClose }) {
         </div>
 
         <div className={`step ${active ? 'active' : ''}`} id="s2">
-          <div className="step-title"><span>2. 内稳态势差层 (状态机)</span><span>⏱️ 1ms</span></div>
+          <div className="step-title"><span>2. 内稳态势差层 (状态机·该轮当时拍——现在值见顶部心跳条)</span><span>⏱️ 1ms</span></div>
           <div className="content-box">
             <div className="gauge-container">
               {[['red', '红', '248,81,73'], ['blue', '蓝', '88,166,255'], ['green', '绿', '63,185,80'], ['social', '社交', '188,140,255'], ['risk', '风险', '210,105,30']].map(([k, l, rgb]) => (
