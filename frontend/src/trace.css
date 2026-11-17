@@ -1,0 +1,83 @@
+/* ============ 全链路追踪 X-Ray(2026-11-17 demo.html 100% 真落地;类名=demo 原样,scope 于 .trace-page) ============ */
+.trace-page { position: fixed; inset: 0; z-index: 200; background: var(--tr-bg); color: var(--tr-text); padding: 20px; overflow-y: auto; display: flex; flex-direction: column; align-items: center; }
+.trace-topbar { width: 100%; max-width: 1000px; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.trace-err { width: 100%; max-width: 1000px; background: rgba(248,81,73,.1); border: 1px solid var(--tr-red); color: var(--tr-red); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
+
+.trace-page .header { text-align: center; margin-bottom: 20px; }
+.trace-page .header h1 { color: #fff; letter-spacing: 2px; margin-bottom: 5px; font-size: 22px; }
+.trace-page .header p { color: #8b949e; font-size: 14px; margin: 0; }
+
+.trace-page .console { width: 100%; max-width: 1000px; display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px; }
+.trace-page .control-row { display: flex; gap: 10px; align-items: center; background: var(--tr-panel); padding: 15px; border-radius: 8px; border: 1px solid var(--tr-border); flex-wrap: wrap; }
+.trace-page .control-label { font-size: 12px; font-weight: bold; color: #8b949e; width: 80px; flex-shrink: 0; }
+
+.trace-page .scenario-btn { background: transparent; color: #c9d1d9; border: 1px solid var(--tr-border); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; transition: all .3s; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-page .scenario-btn:hover { background: rgba(88,166,255,.1); border-color: var(--tr-blue); }
+.trace-page .scenario-btn.active { background: rgba(88,166,255,.2); color: var(--tr-blue); border-color: var(--tr-blue); box-shadow: 0 0 10px rgba(88,166,255,.2); }
+.trace-page .scenario-btn.active-internal { background: rgba(210,105,30,.15); color: var(--tr-orange); border-color: var(--tr-orange); box-shadow: 0 0 10px rgba(210,105,30,.2); }
+
+.trace-page .pipeline { width: 100%; max-width: 1000px; display: flex; flex-direction: column; gap: 15px; }
+.trace-page .step { background-color: var(--tr-panel); border: 1px solid var(--tr-border); border-radius: 8px; padding: 20px; opacity: 0; transform: translateY(20px); transition: all .5s ease-out; }
+.trace-page .step.active { opacity: 1; transform: translateY(0); border-color: var(--tr-blue); }
+.trace-page .step.active-internal { opacity: 1; transform: translateY(0); border-color: var(--tr-orange); }
+
+.trace-page .step-title { font-size: 13px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; display: flex; justify-content: space-between; }
+.trace-page .content-box { background-color: #010409; padding: 15px; border-radius: 6px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; border-left: 4px solid var(--tr-border); }
+.trace-page .content-box code { color: #a5d6ff; }
+.trace-page .stim-text { color: #e6edf3; margin-bottom: 10px; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+.trace-page .proxy-warning { color: var(--tr-red); font-size: 12px; margin-bottom: 10px; }
+
+.trace-page .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-right: 5px; font-weight: bold; margin-bottom: 5px; }
+.trace-page .tag-red { background-color: rgba(248,81,73,.15); color: var(--tr-red); border: 1px solid rgba(248,81,73,.3); }
+.trace-page .tag-blue { background-color: rgba(88,166,255,.15); color: var(--tr-blue); border: 1px solid rgba(88,166,255,.3); }
+.trace-page .tag-green { background-color: rgba(63,185,80,.15); color: var(--tr-green); border: 1px solid rgba(63,185,80,.3); }
+.trace-page .tag-orange { background-color: rgba(210,105,30,.15); color: var(--tr-orange); border: 1px solid rgba(210,105,30,.3); }
+.trace-page .tag-purple { background-color: rgba(188,140,255,.15); color: var(--tr-purple); border: 1px solid rgba(188,140,255,.3); }
+.trace-page .tag-yellow { background-color: rgba(210,153,34,.15); color: var(--tr-yellow); border: 1px solid rgba(210,153,34,.3); }
+
+.trace-page .isolation-wall { height: 40px; background: repeating-linear-gradient(45deg, #161b22, #161b22 10px, #30363d 10px, #30363d 20px); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--tr-red); letter-spacing: 2px; font-weight: bold; opacity: 0; transition: opacity .5s; border: 1px dashed var(--tr-red); }
+.trace-page .isolation-wall.active { opacity: 1; }
+
+.trace-page .gauge-container { display: flex; gap: 15px; margin-top: 10px; }
+.trace-page .gauge { flex: 1; background: #010409; border-radius: 4px; overflow: hidden; height: 24px; position: relative; border: 1px solid var(--tr-border); }
+.trace-page .gauge-fill { height: 100%; width: 0%; transition: width 1s cubic-bezier(.4, 0, .2, 1); }
+.trace-page .gauge-text { position: absolute; top: 0; left: 10px; line-height: 24px; font-size: 12px; font-weight: bold; color: #fff; text-shadow: 1px 1px 2px #000; }
+/* 色卡式 gauge(2026-11-17 Eagle 令「像素要细和色卡一样的细」):渐变条=256 级细粒度,游标=当前值,虚游标=干预后值,Δ=势差轨迹 */
+.trace-page .swatch-track { position: absolute; inset: 0; }
+.trace-page .swatch-needle { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid; box-shadow: 0 0 6px rgba(0,0,0,.9); transition: left 1s cubic-bezier(.4, 0, .2, 1); }
+.trace-page .swatch-ghost { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed; transition: left 1s cubic-bezier(.4, 0, .2, 1); }
+.trace-page .swatch-text i.delta { font-style: normal; font-size: 10px; margin-left: 6px; opacity: .85; }
+.trace-page .state-desc { margin-top: 15px; color: var(--tr-yellow); font-weight: bold; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; }
+.trace-page .hit-line { margin-top: 10px; color: var(--tr-green); }
+
+.trace-page .inner-speech { color: var(--tr-purple); font-size: 16px; font-weight: bold; margin-top: 5px; line-height: 1.5; }
+.trace-page .social-inner { color: var(--tr-purple); font-size: 14px; margin-bottom: 10px; }
+.trace-page .user-reply { background-color: #1f6feb; color: #fff; padding: 12px 16px; border-radius: 8px 8px 0 8px; display: inline-block; margin-top: 10px; max-width: 80%; float: right; clear: both; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+.trace-page .reply-box { border-top: 1px solid var(--tr-border); padding-top: 15px; }
+.trace-page .silent-notice { color: #8b949e; font-style: italic; }
+.trace-page pre { margin: 0; color: #a5d6ff; white-space: pre-wrap; font-family: inherit; font-size: 13px; }
+.trace-page .highlight { color: var(--tr-yellow); }
+.trace-page .dim { color: #8b949e; font-size: 12px; }
+
+.trace-page .terminal-window { background-color: #000; border: 1px solid var(--tr-border); border-radius: 6px; overflow: hidden; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+.trace-page .terminal-header { background-color: #161b22; padding: 8px 12px; display: flex; align-items: center; border-bottom: 1px solid var(--tr-border); }
+.trace-page .terminal-dots { display: flex; gap: 6px; }
+.trace-page .terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+.trace-page .dot-red { background-color: #ff5f56; }
+.trace-page .dot-yellow { background-color: #ffbd2e; }
+.trace-page .dot-green { background-color: #27c93f; }
+.trace-page .terminal-title { margin-left: 15px; font-size: 12px; color: #8b949e; font-family: monospace; }
+.trace-page .terminal-body { padding: 15px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; color: var(--tr-text); line-height: 1.6; max-height: 400px; overflow-y: auto; }
+.trace-page .cli-line { margin-bottom: 8px; white-space: pre-wrap; word-wrap: break-word; }
+.trace-page .cli-thought { color: #8b949e; font-style: italic; }
+.trace-page .cli-tool { color: var(--tr-text); }
+.trace-page .cli-tool-name { color: var(--tr-blue); font-weight: bold; }
+.trace-page .cli-tool-arg { color: #a5d6ff; }
+.trace-page .cli-result { color: var(--tr-green); }
+.trace-page .cli-error { color: var(--tr-red); }
+.trace-page .cli-prompt { color: var(--tr-blue); font-weight: bold; margin-right: 8px; }
+.trace-page .cursor-blink { display: inline-block; width: 8px; height: 15px; background-color: var(--tr-text); animation: tr-blink 1s step-end infinite; vertical-align: middle; }
+@keyframes tr-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* demo :root 变量(隔离命名,不撞 app 主题) */
+.trace-page, :root { --tr-bg: #0d1117; --tr-panel: #161b22; --tr-text: #c9d1d9; --tr-border: #30363d; --tr-red: #f85149; --tr-blue: #58a6ff; --tr-green: #3fb950; --tr-purple: #bc8cff; --tr-yellow: #d29922; --tr-orange: #d2691e; }

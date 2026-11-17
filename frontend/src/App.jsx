@@ -4,11 +4,14 @@ import Chat from './panels/Chat.jsx';
 import Metabolism from './panels/Metabolism.jsx';
 import Config from './panels/Config.jsx';
 import CaPanel from './panels/CaPanel.jsx';
+import Trace from './panels/Trace.jsx';
+import './trace.css'; // 全链路追踪 X-Ray(2026-11-17 demo 100% 真落地)
 
 export default function App() {
   const [snap, setSnap] = useState(null);
   const [showCfg, setShowCfg] = useState(false);
   const [showCa, setShowCa] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
 
   useEffect(() => {
     const es = new EventSource('/api/status/stream');
@@ -22,6 +25,7 @@ export default function App() {
         snap={snap}
         onOpenConfig={() => { setShowCfg((v) => !v); setShowCa(false); }}
         onToggleCa={() => { setShowCa((v) => !v); setShowCfg(false); }}
+        onToggleTrace={() => setShowTrace((v) => !v)}
         showCa={showCa}
       />
       <main>
@@ -30,6 +34,7 @@ export default function App() {
           {showCa ? <CaPanel /> : showCfg ? <Config onClose={() => setShowCfg(false)} /> : <Metabolism snap={snap} />}
         </section>
       </main>
+      {showTrace && <Trace onClose={() => setShowTrace(false)} />}
     </div>
   );
 }
