@@ -48,9 +48,6 @@ export default function CaPanel() {
             </>
           ) : <p className="mini">暂无(引擎未写 pvector 行)</p>}
         </Card>
-        <Card title="钱包">
-          {s.wallet ? <p><b>¥{s.wallet.remainingCny}</b> / 今日额度 · 已烧 ¥{s.wallet.burnedCny} · 水位 {s.wallet.pct}%</p> : <p className="mini">暂无</p>}
-        </Card>
         <Card title="工程验收三条(§13.1)">
           {acc ? (
             <ul>

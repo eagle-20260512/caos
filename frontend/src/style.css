@@ -3,10 +3,10 @@
 body { margin: 0; background: #0d1117; color: #e6edf3; font: 14px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
 .app { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
 
-.vitals { display: flex; align-items: stretch; gap: 12px; padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex-wrap: wrap; }
-.vitals .brand { font-size: 20px; font-weight: 700; align-self: center; margin-right: 12px; }
+.vitals { display: flex; align-items: stretch; gap: 8px; padding: 10px 12px; background: #161b22; border-bottom: 1px solid #30363d; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+.vitals .brand { font-size: 20px; font-weight: 700; align-self: center; margin-right: 4px; flex-shrink: 0; }
 .vitals .brand .sub { font-size: 11px; font-weight: 400; color: #8b949e; margin-left: 8px; }
-.vitals .cell { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 6px 14px; min-width: 130px; }
+.vitals .cell { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 6px 10px; min-width: 0; flex-shrink: 1; white-space: nowrap; }
 .vitals .cell label { display: block; font-size: 11px; color: #8b949e; }
 .vitals .cell b { font-size: 18px; }
 .vitals .cell .mini { display: block; font-size: 10px; color: #6e7681; }
@@ -86,7 +86,7 @@ h3 { font-size: 13px; color: #8b949e; margin: 14px 0 6px; }
 .vts { color: #6e7681; flex: 0 0 64px; }
 .vtext { color: #adbac7; }
 
-.gear { margin-left: auto; align-self: center; background: none; border: 1px solid #30363d; border-radius: 8px; color: #8b949e; font-size: 18px; padding: 4px 10px; cursor: pointer; }
+.gear { margin-left: auto; align-self: center; background: none; border: 1px solid #30363d; border-radius: 8px; color: #8b949e; font-size: 18px; padding: 4px 10px; cursor: pointer; flex-shrink: 0; }
 .gear:hover { color: #e6edf3; border-color: #58a6ff; }
 .config-panel h3 { margin-top: 16px; }
 .config-panel label { display: block; font-size: 11px; color: #8b949e; margin: 8px 0 2px; }
@@ -108,7 +108,7 @@ h3 { font-size: 13px; color: #8b949e; margin: 14px 0 6px; }
 /* CA 家账标签页(2026-11-17 Eagle 令:顶部设置左侧 CA 标签;只读聚合 60s 自刷) */
 .gear.ca-tab { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
 .gear.ca-tab.active { color: #3fb950; border-color: #3fb950; }
-.ca-panel { padding: 12px; overflow-y: auto; height: 100%; box-sizing: border-box; }
+.col.meta > .ca-panel { overflow-y: auto; min-height: 0; height: 100%; box-sizing: border-box; padding: 12px; }
 .ca-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .ca-card { background: #0d1117; border: 1px solid #30363d; border-radius: 10px; padding: 10px 12px; }
 .ca-card h3 { margin: 0 0 8px; font-size: 13px; color: #58a6ff; }
