@@ -190,6 +190,18 @@ export default function Trace({ onClose }) {
                 : '（该轮前无 pvector 账——势差从下拍起算,如实留空）'}
               {c?.p?.after && P && <span> → 干预后: 红{num(c.p.after.red)} 蓝{num(c.p.after.blue)} 绿{num(c.p.after.green)}</span>}
             </div>
+            {/* 五排·四情绪轴(2026-11-17 Eagle 令「X-Ray 情绪排」):孤独紫/好奇青/愧疚暗红/骄傲金,同 256 级渐变+游标;
+                真源=hormone-trace 该轮前最近带 emotion 行(随真轮滚动;缺账=如实 —,禁脑补) */}
+            <div className="gauge-container" style={{ marginTop: 8 }}>
+              {[['lonely', '孤独', '168,85,247'], ['curious', '好奇', '34,211,238'], ['guilty', '愧疚', '185,28,28'], ['proud', '骄傲', '234,179,8']].map(([k, l, rgb]) => (
+                <div className="gauge swatch" key={k}>
+                  <div className="swatch-track" style={{ background: `linear-gradient(90deg, rgba(${rgb},0.06), rgba(${rgb},0.9))` }} />
+                  {c?.emotion && <div className="swatch-needle" style={{ left: pct(c.emotion[k]), borderColor: `rgb(${rgb})` }} />}
+                  <div className="gauge-text swatch-text">{l}: {c?.emotion && typeof c.emotion[k] === 'number' ? c.emotion[k].toFixed(3) : '—'}</div>
+                </div>
+              ))}
+            </div>
+            {c && <div className="dim" style={{ marginTop: 4 }}>四情绪轴采样:{c.emotion ? String(c.emotion.ts).slice(11, 19) : '该轮前无 emotion 账(旧轮如实 —)'} · 真源 hormone-trace · 家账面=emotion.json 现值</div>}
           </div>
         </div>
 

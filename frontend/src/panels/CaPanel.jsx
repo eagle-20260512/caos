@@ -83,6 +83,17 @@ export default function CaPanel() {
         <Card title="蒸馏灰度账">
           {s.gray ? <p>挂灰度 {s.gray.gray ?? 0} · 转正 {s.gray.promoted ?? 0} · 过期 {s.gray.expired ?? 0} · 回滚 {s.gray.rolledBack ?? 0}</p> : <p className="mini">暂无</p>}
         </Card>
+        <Card title="四情绪轴(现值;脸色阈 0.6)">
+          {s.emotion ? (
+            <>
+              <Bar label="孤独" v={s.emotion.lonely} th={0.6} />
+              <Bar label="好奇" v={s.emotion.curious} th={0.6} />
+              <Bar label="愧疚" v={s.emotion.guilty} th={0.6} />
+              <Bar label="骄傲" v={s.emotion.proud} th={0.6} />
+              <p className="mini">采样 {s.emotion.ts?.slice(11, 19)} · 真源 emotion.json(hormTick 落)· X-Ray 第五排同源</p>
+            </>
+          ) : <p className="mini">暂无(hormTick 未落,如实)</p>}
+        </Card>
         <Card title="生存债硬墙">
           {s.survival ? <p>账上欠 {s.survival.debt ?? 0} / 墙 {s.survival.wall ?? '—'} · {s.survival.ok ? '✅ 放行态' : '⛔ SAFE_MODE_ABORT'}</p> : <p className="mini">暂无</p>}
         </Card>
