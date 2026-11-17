@@ -2,7 +2,7 @@ import React from 'react';
 import FuturesCells from './Futures.jsx';
 
 // 生命体征头:活性(濒死红闪)/钱包/疲劳/经济痛+未来细胞组(预期死期/贴现痛觉/愿景偏差)——单行总览
-export default function Vitals({ snap, onOpenConfig, onToggleCa, onToggleTrace, showCa }) {
+export default function Vitals({ snap, onOpenConfig, onToggleCa, onToggleTrace, showTrace, showCa }) {
   const v = snap?.vitality?.vitality;
   const state = snap?.vitality?.state ?? '…';
   const dying = typeof v === 'number' && v < 0.5;
@@ -56,7 +56,7 @@ export default function Vitals({ snap, onOpenConfig, onToggleCa, onToggleTrace, 
         <span className="mini">在排事件</span>
       </div>
       <FuturesCells snap={snap} />
-      <button className={`gear ca-tab${showTrace !== undefined ? '' : ''}`} title="全链路追踪 X-Ray" onClick={onToggleTrace}>追踪</button>
+      <button className={`gear ca-tab${showTrace ? ' active' : ''}`} title="全链路追踪 X-Ray" onClick={onToggleTrace}>追踪</button>
       <button className={`gear ca-tab${showCa ? ' active' : ''}`} title="CA 家账" onClick={onToggleCa}>CA</button>
       <button className="gear" title="配置" onClick={onOpenConfig}>⚙</button>
     </header>

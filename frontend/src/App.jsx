@@ -26,6 +26,7 @@ export default function App() {
         onOpenConfig={() => { setShowCfg((v) => !v); setShowCa(false); }}
         onToggleCa={() => { setShowCa((v) => !v); setShowCfg(false); }}
         onToggleTrace={() => setShowTrace((v) => !v)}
+        showTrace={showTrace}
         showCa={showCa}
       />
       <main>
