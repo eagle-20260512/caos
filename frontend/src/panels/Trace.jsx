@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-// Trace.jsx — CA 认知体全链路追踪 X-Ray(2026-11-17 Eagle 令:demo.html 100% 真落地)
-// 视觉=demo 1:1(七步瀑布/控制台双排/三色 gauge/物理隔离墙/CC CLI 终端窗/打字机/静默通知);
-// 数据=真账(/api/trace/*):场景=无数真轮,按真刺激分辨(外部=蓝/内部自启动=橙),不做 canned 按钮。
-// 执行层=organ-trace SSE 直播(逐轮逐工具 CC CLI 式可见);缺账=如实显示(禁脑补)。
+// Trace.jsx — CA 认知体全链路追踪 X-Ray(2026-11-17 Eagle 夜令重设计 v2:七层全量透明 + 判执环)
+// 上一版(Eagle 认可的透明基线)的每一个细节面全部保留:刺激源/态差五维+四情绪/图记忆检索/槽位包+出耳五闸/
+// 物理隔离墙/CC CLI 终端(SSE 直播)/信用分配/对外输出/打字机,一拍不少;
+// 本版新增(宪令「环形综合评判,展示内语和 LLM 的一轮或多轮交互」):
+//   判断位 v3 契约卡(assumptions/doubts/expUse/missing/branch 全显)+slotsV3 槽位+终审三裁(continue 绕圈/close 判断位的嘴/fail 可见)+伤疤墙;
+//   控制台=真轮流单排(双排取消,色=拍类);数据=双真账源 /api/trace/:id(七层)+ /api/trace/:id/loop(判执环),缺账=如实,禁罐头。
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -14,15 +16,17 @@ async function typeWriter(setText, text, speed) {
 
 const pct = (v) => `${Math.max(0, Math.min(1, Number(v) || 0)) * 100}%`;
 const num = (v) => (typeof v === 'number' ? v.toFixed(2) : '—');
+const fmtTs = (t) => String(t ?? '').slice(11, 19);
+const BRANCH_TONE = { 探查: 'yellow', 试探: 'purple', 确定: 'green' };
+const REVIEW_TONE = { continue: 'purple', close: 'blue', fail: 'red' };
+const LESSON_LABEL = { scar: '毒打疤', 'parse-fail': '解析毒打', 'gate-reject': '闸拒疤', closed: '闭环', reinforce: '受赏', 'exp-conflict': '经验冲突疤' };
+
 const tagsOf = (t) => {
   const out = [];
   const push = (l, c) => out.push(<span className={`tag tag-${c}`} key={l}>{l}</span>);
   const cue = t.cueIntent || t.cue;
   if (cue) push(`Cue: ${cue}`, { 排障: 'blue', 社交: 'purple', 巡检: 'green', 安抚: 'purple' }[cue] || 'blue');
-  if (t.external) push('外部刺激', 'blue');
-  else if (t.type === 'cc-turn') push('CC 窗轮', 'orange');
-  else push('内部自启动', 'orange');
-  if (t.type && t.type !== 'cc-turn') push(t.type, 'yellow');
+  push(t.type === 'cc-turn' ? 'CC 窗轮' : t.type || '真轮', 'yellow'); // 事件类型=账面事实,中性色(非理论分类)
   if (t.feedbackTag) push(`消化:${t.feedbackTag}`, 'orange');
   return out;
 };
@@ -44,10 +48,48 @@ function cliRow(r) {
   return null;
 }
 
+// 判断位 v3 契约全显(权衡显形:assumptions/doubts/expUse 置信度/missing 关键缺项/branch 三分支/裁由)
+function JudgmentCard({ m }) {
+  const j = m.judgment;
+  if (!j) return <div className="dim">判断位无结构化产出({m.source}){m.why ? `:${m.why}` : ''}</div>;
+  return (
+    <div>
+      <div className="jud-field">
+        <span className="tag tag-blue">{j.utteranceType}</span><span className="tag tag-blue">{j.intent}</span>
+        {j.stance && <span className="tag tag-green">{j.stance}</span>}
+        {j.pressure && <span className="tag tag-yellow">压:{j.pressure}</span>}
+        {j.branch && <span className={`branch-chip tag tag-${BRANCH_TONE[j.branch] ?? 'blue'}`}>branch:{j.branch}</span>}
+      </div>
+      {j.why && <div className="jud-field">裁由:<b>{j.why}</b></div>}
+      {(j.assumptions ?? []).length > 0 && <div className="jud-field">假设:<span className="dim">{j.assumptions.join(' / ')}</span></div>}
+      {(j.doubts ?? []).length > 0 && <div className="jud-field">疑:<span className="dim">{j.doubts.join(' / ')}</span></div>}
+      {j.expUse && <div className="jud-field">经验用:<b>{j.expUse.confidence}</b> <span className="dim">{j.expUse.why ?? ''}</span></div>}
+      {j.missing && (((j.missing.critical ?? []).length + (j.missing.minor ?? []).length) > 0) && (
+        <div className="jud-field">缺:{(j.missing.critical ?? []).length > 0 && <span style={{ color: 'var(--tr-red)' }}>关键[{j.missing.critical.join(';')}] </span>}{(j.missing.minor ?? []).length > 0 && <span className="dim">次要[{j.missing.minor.join(';')}]</span>}</div>
+      )}
+      {(m.expIds ?? []).length > 0 && <div className="dim">经验链:{m.expIds.join(' · ')}</div>}
+      <div className="dim">{m.source} · prompt {m.promptVer ?? '—'}{m.usage ? ` · in ${m.usage.input_tokens}/out ${m.usage.output_tokens} tok` : ''}{m.retryOf ? ` · retryOf:${String(m.retryOf).slice(0, 44)}` : ''}</div>
+    </div>
+  );
+}
+
+// slotsV3 槽位全显(有真源槽机械填+思考槽判断位填)
+function SlotsGrid({ slots }) {
+  if (!slots) return null;
+  return (
+    <div className="slot-grid">
+      {Object.entries(slots).map(([k, v]) => (
+        <div className="slot-item" key={k}><b>{k}</b><span>{typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}</span></div>
+      ))}
+    </div>
+  );
+}
+
 export default function Trace({ onClose }) {
   const [turns, setTurns] = useState(null);
   const [active, setActive] = useState(null);
-  const [chain, setChain] = useState(null);
+  const [chain, setChain] = useState(null);   // 七层真账(/api/trace/:id)
+  const [ring, setRing] = useState(null);     // 判执环真账(/api/trace/:id/loop:rounds/mindRows/lessons)
   const [cli, setCli] = useState([]); // 终端行{cls,html}
   const [innerTxt, setInnerTxt] = useState('');
   const [replyTxt, setReplyTxt] = useState('');
@@ -73,28 +115,34 @@ export default function Trace({ onClose }) {
   const play = async (t) => {
     if (runRef.current) return;
     runRef.current = true;
-    setActive(t); setChain(null); setCli([]); setInnerTxt(''); setReplyTxt(''); setSilent(false); setErr(null);
-    const ids = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
+    setActive(t); setChain(null); setRing(null); setCli([]); setInnerTxt(''); setReplyTxt(''); setSilent(false); setErr(null);
+    const ids = ['s1', 's2', 's3', 's4', 's5', 'srev', 's6', 's7'];
     const el = (id) => document.getElementById(id);
-    const cls = t.external ? 'active' : 'active-internal';
-    ids.forEach((s) => el(s)?.classList.remove('active', 'active-internal'));
+    ids.forEach((s) => el(s)?.classList.remove('active'));
     el('wall')?.classList.remove('active');
     try {
-      const j = await (await fetch(`/api/trace/${encodeURIComponent(t.id)}`)).json();
-      if (j.error) { setErr(j.error); runRef.current = false; return; }
-      setChain(j);
-      el('s1')?.classList.add(cls); await sleep(800);
-      el('s2')?.classList.add(cls); await sleep(1200);
-      el('s3')?.classList.add(cls); await sleep(1000);
-      el('s4')?.classList.add(cls); await sleep(300);
+      // 双真账源:七层全量 + 判执环;环账失败不毁七层(降级可见)
+      const [cR, lR] = await Promise.allSettled([
+        fetch(`/api/trace/${encodeURIComponent(t.id)}`).then((r) => r.json()),
+        fetch(`/api/trace/${encodeURIComponent(t.id)}/loop`).then((r) => r.json()),
+      ]);
+      const j = cR.status === 'fulfilled' ? cR.value : null;
+      const lr = lR.status === 'fulfilled' && !lR.value?.error ? lR.value : null;
+      if (!j || j.error) { setErr(j?.error ?? (cR.status === 'rejected' ? String(cR.reason) : '七层账缺失')); runRef.current = false; return; }
+      setChain(j); setRing(lr);
+      el('s1')?.classList.add('active'); await sleep(700);
+      el('s2')?.classList.add('active'); await sleep(1100);
+      el('s3')?.classList.add('active'); await sleep(900);
+      el('s4')?.classList.add('active'); await sleep(300);
       const line = typeof j.inner === 'string' ? j.inner : j.inner?.line;
       if (line) await typeWriter(setInnerTxt, line, 25);
-      await sleep(600);
-      // 隔离墙 + 5. 终端流式执行
-      el('wall')?.classList.add('active');
       await sleep(500);
-      el('s5')?.classList.add(cls);
-      const isLive = t.kind === 'loop' && !j.route?.via && (j.execution?.rounds != null || j.execution?.trace?.length >= 0);
+      // 隔离墙 + 5. 终端流式执行(逐圈:第1圈=主终端,终审 continue 的补圈=后续终端)
+      el('wall')?.classList.add('active');
+      await sleep(450);
+      el('s5')?.classList.add('active');
+      const rounds = (lr?.rounds ?? []).length ? lr.rounds : null;
+      const isLive = t.kind === 'loop' && !j.route?.via && !j.reply;
       if (t.kind === 'loop' && !j.route?.via) {
         // organ-trace SSE 直播(真实时;回执帧=收口)
         try {
@@ -104,29 +152,37 @@ export default function Trace({ onClose }) {
           es.onmessage = (e) => { try { const r = JSON.parse(e.data); const row = cliRow(r); if (row) pushCli(row); } catch { /* 坏帧跳 */ } };
           es.addEventListener('end', () => { es.close(); if (esRef.current === es) esRef.current = null; });
         } catch { /* 直播断=回放账面 */ }
-        if (Array.isArray(j.execution?.trace)) j.execution.trace.forEach((r) => { const row = cliRow(r); if (row) pushCli(row); }); // 已落账行先铺
+        const organ0 = rounds ? (rounds[0]?.organ ?? []) : (j.execution?.trace ?? []);
+        if (Array.isArray(organ0)) organ0.forEach((r) => { const row = cliRow(r); if (row) pushCli(row); }); // 已落账行先铺
       } else {
         const via = j.route?.via ?? (t.kind === 'cc' ? 'cc-window' : 'mechanical');
-        pushCli({ cls: 'cli-thought', html: <>{via === 'l1' ? '零 LLM:L1 图直答(纯代码,不烧器官)' : via === 'mechanical' || via === 'slash-fast' ? '零 LLM:机械执行体直跑' : t.kind === 'cc' ? 'CC 开发窗面:执行器=CC 会话自身(无 organ-trace 账,注入面探针账见第 4 步)' : `路由:${via}`}</>, key: 'route' });
-        if (Array.isArray(j.execution?.trace)) j.execution.trace.forEach((r) => { const row = cliRow(r); if (row) pushCli(row); });
+        pushCli({ cls: 'cli-thought', html: <>{via === 'l1' ? '零 LLM:L1 图直答(纯代码,不烧器官)' : via === 'mechanical' || via === 'slash-fast' ? '零 LLM:机械执行体直跑' : t.kind === 'cc' ? 'CC 开发窗面:执行器=CC 会话自身(无 organ-trace 账,注入面探针账见第 4 拍)' : `路由:${via}`}</>, key: 'route' });
+        const organ0 = rounds ? (rounds[0]?.organ ?? []) : (j.execution?.trace ?? []);
+        if (Array.isArray(organ0)) organ0.forEach((r) => { const row = cliRow(r); if (row) pushCli(row); });
       }
-      await sleep(1200);
-      el('s6')?.classList.add(cls); await sleep(1200);
-      el('s7')?.classList.add(cls); await sleep(400);
-      const ans = j.reply?.answer;
+      await sleep(1100);
+      el('srev')?.classList.add('active'); await sleep(900);
+      el('s6')?.classList.add('active'); await sleep(1100);
+      el('s7')?.classList.add('active'); await sleep(400);
+      const sayLine = (lr?.rounds ?? []).map((r) => r.sayLine).filter(Boolean).slice(-1)[0] ?? null;
+      const ans = sayLine ?? j.reply?.answer;
       if (ans) await typeWriter(setReplyTxt, ans, 40);
       else setSilent(true);
     } catch (e) { setErr(String(e.message ?? e)); }
     runRef.current = false;
   };
 
-  const ext = (turns ?? []).filter((t) => t.external);
-  const intern = (turns ?? []).filter((t) => !t.external);
   const c = chain;
+  const lr = ring;
+  const rounds = (lr?.rounds ?? []).length ? lr.rounds : null; // 环账空=路由层/机械/账窗外轮(如实降级到七层账)
   const P = c?.p?.before;
-  const stepCls = active ? (active.external ? 'active' : 'active-internal') : '';
+  const mindRowsAll = (rounds ?? []).flatMap((r) => r.mindRows ?? []);
+  const mindLine0 = innerTxt || (mindRowsAll.find((m) => m.line)?.line ?? ''); // 判断位出话即显示(L2/路由轮无 inner-inject 账≠静默,如实)
+  const okMind = mindRowsAll.find((m) => m.slotsV3);
+  const sayLine = (rounds ?? []).map((r) => r.sayLine).filter(Boolean).slice(-1)[0] ?? null;
+  const lessons = lr?.lessons ?? [];
   const btn = (t) => (
-    <button key={t.id + t.ts} className={`scenario-btn ${active?.id === t.id ? (t.external ? 'active' : 'active-internal') : ''}`}
+    <button key={t.id + t.ts} className={`scenario-btn ${active?.id === t.id ? 'active' : ''}`}
       onClick={() => play(t)} title={t.text || t.cue || t.type}>
       {t.type} · {String(t.ts ?? '').slice(11, 16)}
     </button>
@@ -137,19 +193,16 @@ export default function Trace({ onClose }) {
       <div className="trace-topbar">
         <div className="header">
           <h1>Cognitive Agent 全链路追踪 X-Ray</h1>
-          <p>状态驱动 · 记忆索引 · 无状态 LLM 器官化 · CLI 透明执行 · 真账驱动(场景=无数真轮,按刺激分辨)</p>
+          <p>状态驱动 · 记忆索引 · 无状态 LLM 器官化 · CLI 透明执行 · 真账驱动 · 判执环(判→执→审多圈可回放)</p>
         </div>
         <button className="gear" onClick={onClose}>✕</button>
       </div>
 
       <div className="console">
         <div className="control-row">
-          <div className="control-label">外部刺激</div>
-          {ext.length ? ext.map(btn) : <span className="dim">（暂无外部真轮——账面如实）</span>}
-        </div>
-        <div className="control-row">
-          <div className="control-label">内生驱动</div>
-          {intern.length ? intern.map(btn) : <span className="dim">（暂无内部真轮——账面如实）</span>}
+          <div className="control-label">真轮流</div>
+          {(turns ?? []).map(btn)}
+          {turns != null && turns.length === 0 && <span className="dim">（暂无真轮——账面如实）</span>}
           {turns == null && <span className="dim">读取真轮次流…</span>}
         </div>
       </div>
@@ -157,27 +210,27 @@ export default function Trace({ onClose }) {
       {err && <div className="trace-err">追踪面异常:{err}(缺账=如实,不造演示数据)</div>}
 
       <div className="pipeline">
-        <div className={`step ${stepCls}`} id="s1">
-          <div className="step-title"><span>1. 刺激源 ({active ? (active.type === 'cc-turn' ? 'CC 窗拦截面' : active.external ? '外部 Proxy' : '内部自检') : '等待选择真轮'})</span><span>⏱️ 2ms</span></div>
+        <div className={`step ${active ? 'active' : ''}`} id="s1">
+          <div className="step-title"><span>1. 刺激源 ({active ? (active.type === 'cc-turn' ? 'CC 窗拦截面' : 'Proxy 拦截 / Tick 定时器 / 自启动') : '等待选择真轮'})</span><span>⏱️ 2ms</span></div>
           <div className="content-box">
-            <div className="stim-text">{active ? (active.text || `（${active.type}${active.cue ? ` · cue:${active.cue}` : ''}）`) : '在上方控制台选一个真轮…'}</div>
+            <div className="stim-text">{active ? (c?.stimulus?.text ?? (active.text || `（${active.type}${active.cue ? ` · cue:${active.cue}` : ''}）`)) : '在上方控制台选一个真轮…'}</div>
             <div className="proxy-warning">
               {active?.kind === 'cc' ? '⚠️ 本窗注入面已内语化+原话留账(raw-inbox);宿主对模型面的原文投递不经 hook=管辖边界(如实留档)'
-                : active ? (active.external ? '⚠️ 原话已被 Proxy 物理拦截，情绪与废话已剥离(原话全文=机器面账,出耳闸字节探针守门)。' : `🧠 内部审计触发:${String(active.text ?? '').slice(0, 80)}`) : ''}
+                : active ? '⚠️ 原话已被 Proxy 物理拦截，情绪与废话已剥离(原话全文=机器面账,出耳闸字节探针守门)。' : ''}
             </div>
             <div>{active ? tagsOf(active) : null}</div>
-            {c?.stimulus?.sha && <div className="dim" style={{ marginTop: 6 }}>原话 sha:{c.stimulus.sha} · 指针:{c.stimulus.rawRef}</div>}
+            {lr?.cue16 && <div className="dim" style={{ marginTop: 6 }}>判断位轮钥匙 cue16:{lr.cue16}(sha256(原话)前16hex——判断位账/伤疤账按此对轮)</div>}
+            {c?.stimulus?.sha && <div className="dim">原话 sha:{c.stimulus.sha} · 指针:{c.stimulus.rawRef}</div>}
             {c?.stimulus?.feedbackTag && <div className="dim">机械分类:{c.stimulus.feedbackTag}</div>}
           </div>
         </div>
 
-        <div className={`step ${stepCls}`} id="s2">
+        <div className={`step ${active ? 'active' : ''}`} id="s2">
           <div className="step-title"><span>2. 内稳态势差层 (状态机)</span><span>⏱️ 1ms</span></div>
           <div className="content-box">
             <div className="gauge-container">
               {[['red', '红', '248,81,73'], ['blue', '蓝', '88,166,255'], ['green', '绿', '63,185,80'], ['social', '社交', '188,140,255'], ['risk', '风险', '210,105,30']].map(([k, l, rgb]) => (
                 <div className="gauge swatch" key={k}>
-                  {/* 色卡层:Eagle 令「像素要细和色卡一样的细」——账本全精度,呈现=256 级渐变条+游标+三位小数+Δ 轨迹 */}
                   <div className="swatch-track" style={{ background: `linear-gradient(90deg, rgba(${rgb},0.06), rgba(${rgb},0.9))` }} />
                   {P && <div className="swatch-needle" style={{ left: pct(P[k]), borderColor: `rgb(${rgb})` }} />}
                   {c?.p?.after && P && <div className="swatch-ghost" style={{ left: pct(c.p.after[k]), borderColor: `rgba(${rgb},0.55)` }} />}
@@ -190,8 +243,6 @@ export default function Trace({ onClose }) {
                 : '（该轮前无 pvector 账——势差从下拍起算,如实留空）'}
               {c?.p?.after && P && <span> → 干预后: 红{num(c.p.after.red)} 蓝{num(c.p.after.blue)} 绿{num(c.p.after.green)}</span>}
             </div>
-            {/* 五排·四情绪轴(2026-11-17 Eagle 令「X-Ray 情绪排」):孤独紫/好奇青/愧疚暗红/骄傲金,同 256 级渐变+游标;
-                真源=hormone-trace 该轮前最近带 emotion 行(随真轮滚动;缺账=如实 —,禁脑补) */}
             <div className="gauge-container" style={{ marginTop: 8 }}>
               {[['lonely', '孤独', '168,85,247'], ['curious', '好奇', '34,211,238'], ['guilty', '愧疚', '185,28,28'], ['proud', '骄傲', '234,179,8']].map(([k, l, rgb]) => (
                 <div className="gauge swatch" key={k}>
@@ -205,7 +256,7 @@ export default function Trace({ onClose }) {
           </div>
         </div>
 
-        <div className={`step ${stepCls}`} id="s3">
+        <div className={`step ${active ? 'active' : ''}`} id="s3">
           <div className="step-title"><span>3. 图记忆检索 (状态键控)</span><span>⏱️ 8ms</span></div>
           <div className="content-box">
             {P && <div>🧠 检索坐标: <code>[{num(P.red)}, {num(P.blue)}, {num(P.green)}]</code></div>}
@@ -214,12 +265,28 @@ export default function Trace({ onClose }) {
             {c?.memory?.retrieved && <div>🧠 检索面:承诺 {c.memory.retrieved.promises ?? 0} / 故事线 {c.memory.retrieved.storylines ?? 0} / 召回 {c.memory.retrieved.recall ?? 0}({c.memory.retrieved.recallState ?? '—'})</div>}
             {c?.p?.tension && <div>🧠 CC 窗轮:状态槽 <code>{c.p.slot}</code> · 张力 <code>{c.p.tension}</code>{c.p.trigger ? ` · ${c.p.trigger}` : ''}</div>}
             {c && !c.memory?.l1 && !c.memory?.l2 && !c.memory?.retrieved && !c?.p?.tension && <div style={{ color: 'var(--tr-red)' }}>⚠️ 图记忆未命中该状态的高权因果链（盲区轮,如实显示）。</div>}
+            {(lr?.expChains ?? []).length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div className="dim">五维检索调出的完整经验(原话全文/动作行/结果势差/痛快——不是几个词语):</div>
+                {lr.expChains.map((e) => (e.missing || !e.cue) ? (
+                  <div className="scar" key={e.id}><b>{e.id} · 链行缺(如实空)</b><span>链账无此行——没经验不硬上经验(禁脑补)</span></div>
+                ) : (
+                  <div className="slot-item" key={e.id} style={{ marginTop: 6 }}>
+                    <b>{e.id} · {String(e.opened ?? '').slice(0, 10)}{e.closed ? ' · 已闭环' : ' · 开链中'}</b>
+                    <span>原话:{e.cue}{'\n'}动作行:{e.actionLine ?? '(无动作行账,如实)'}{'\n'}结果:ΔP={JSON.stringify(e.dP ?? {})} · 痛{e.pain ?? '—'}/快{e.pleasure ?? '—'} · 权重{e.weight ?? '—'}{e.cmds != null ? ` · cmds ${e.cmds}/errs ${e.errs ?? 0}` : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {!c && <span className="dim">选择真轮后显示真实检索面…</span>}
+            {(lr?.rounds ?? []).flatMap((r) => r.mindRows ?? []).some((m) => (m.expIds ?? []).length > 0) && (
+              <div className="dim" style={{ marginTop: 6 }}>判断位用的经验链:{[...new Set((rounds ?? []).flatMap((r) => r.mindRows ?? []).flatMap((m) => m.expIds ?? []))].join(' · ')}</div>
+            )}
           </div>
         </div>
 
-        <div className={`step ${stepCls}`} id="s4">
-          <div className="step-title"><span>4. 内语编译器 (纯代码决策 + LLM渲染)</span><span>⏱️ 350ms</span></div>
+        <div className={`step ${active ? 'active' : ''}`} id="s4">
+          <div className="step-title"><span>4. 判断位 (内语编译 → 权衡显形 → 指令包)</span><span>⏱️ 350ms</span></div>
           <div className="content-box">
             <div className="dim">[纯代码] 槽位包 (意图与约束):</div>
             <pre>{c ? JSON.stringify({
@@ -229,6 +296,17 @@ export default function Trace({ onClose }) {
               injected: c.inner?.injected, redacted: c.inner?.redacted || undefined,
               stage1_dp: c.compile?.stage1?.dpSha || undefined,
             }, null, 1) : ''}</pre>
+            {okMind && <SlotsGrid slots={okMind.slotsV3} />}
+            {/* 判断位 v3 契约卡:权衡显形+三分支(环形判执环的第「判」拍) */}
+            {mindRowsAll.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div className="dim">[判断位·v3] 权衡与裁定({mindRowsAll.length} 次判——失败/毒打/重判全显):</div>
+                {mindRowsAll.map((m, k) => <div key={k} style={{ marginTop: 8 }}><JudgmentCard m={m} /></div>)}
+              </div>
+            )}
+            {c && mindRowsAll.length === 0 && (
+              <div className="dim" style={{ marginTop: 8 }}>（该轮无判断位账:路由层轮/机械轮/判位静默轮——如实）</div>
+            )}
             <div className="dim" style={{ marginTop: 10 }}>[出耳闸] 五闸安检:{c?.gate
               ? (c.gate.verdict === 'PASS'
                 ? <span style={{ color: 'var(--tr-green)' }}>PASS ✅({c.gate.probe}探针,原话命中 {c.gate.hits.length})</span>
@@ -237,33 +315,97 @@ export default function Trace({ onClose }) {
                 ? <>注入面探针:{c.probe.map((p) => <span key={p.surface}> [{p.surface}={p.verdict}{p.hits ? `(咬${p.hits})` : ''}]</span>)}</>
                 : <span style={{ color: 'var(--tr-green)' }}>PASS ✅</span>}</div>
             {c?.compile?.audit && <div className="dim">编译面:刺激 {c.compile.audit.stimulusBytes}B · 指令性={String(c.compile.audit.directive_like)}{c.compile.audit.quarantined ? '(已隔离)' : ''}{c.compile.stage1 ? ` · stage1 dp=${c.compile.stage1.dpSha}` : ''}</div>}
+            {rounds && rounds.some((r) => (r.reviewEvents ?? []).length > 0) && (
+              <div style={{ marginTop: 6 }}>{rounds.flatMap((r) => r.reviewEvents ?? []).map((e, k) => (
+                <div className="scar" key={k}><b>守门拍:{e.event}</b><span>{e.why ?? ''}</span></div>
+              ))}</div>
+            )}
             <div className="dim">[LLM渲染器] 输出第一人称指令:</div>
-            <div className="inner-speech">{innerTxt || (c ? (c.inner ? '' : '(内语静默:零势差,无新话)') : '…')}</div>
+            <div className="inner-speech">{mindLine0 || (c ? (c.inner ? '' : '(该轮无内语注入账——路由层/机械轮;判断位卡如上,如实)') : '…')}</div>
           </div>
         </div>
 
         <div className="isolation-wall" id="wall">=== 物理隔离墙：LLM 看不到参数与原话，只能执行内语 ===</div>
 
-        <div className={`step ${stepCls}`} id="s5">
-          <div className="step-title"><span>5. 执行层 (无状态 LLM 器官 - CLI)</span><span>⏱️ 实时</span></div>
+        <div className={`step ${active ? 'active' : ''}`} id="s5">
+          <div className="step-title"><span>5. 执行层 (无状态 LLM 器官 - CLI){rounds && rounds.length > 1 ? ` · 判执环 ${rounds.length} 圈` : ''}</span><span>⏱️ 实时</span></div>
           <div className="content-box" style={{ padding: 0, background: 'transparent', borderLeft: 'none' }}>
-            <div className="terminal-window">
-              <div className="terminal-header">
-                <div className="terminal-dots"><div className="terminal-dot dot-red" /><div className="terminal-dot dot-yellow" /><div className="terminal-dot dot-green" /></div>
-                <div className="terminal-title">ca-agent — organ — {active ? String(active.id).slice(0, 18) : '80x24'}</div>
+            {(rounds ?? []).map((r, i) => (
+              <div key={i} style={i > 0 ? { marginTop: 14, borderTop: '1px dashed var(--tr-border)', paddingTop: 12 } : null}>
+                {i > 0 && <div className="loop-chip" style={{ marginBottom: 10 }}>⟳ 第 {r.n} 圈(终审 continue 换装新指令再干){r.live ? ' · 执行中' : ''}</div>}
+                <div className="terminal-window">
+                  <div className="terminal-header">
+                    <div className="terminal-dots"><div className="terminal-dot dot-red" /><div className="terminal-dot dot-yellow" /><div className="terminal-dot dot-green" /></div>
+                    <div className="terminal-title">ca-agent — organ — {active ? String(active.id).slice(0, 18) : '80x24'}{i > 0 ? ` · 圈${r.n}` : ''}</div>
+                  </div>
+                  <div className="terminal-body" ref={i === 0 ? termRef : null}>
+                    {i === 0 && c?.execution?.note && <div className="cli-line cli-thought">{c.execution.note}</div>}
+                    {(r.organ ?? []).map((row, k) => { const l = cliRow(row); return l ? <div key={k} className={`cli-line ${l.cls}`}>{l.html}</div> : null; })}
+                    {i === (rounds?.length ?? 1) - 1 && cli.map((l, k) => <div key={`live${k}`} className={`cli-line ${l.cls}`}>{l.html}</div>)}
+                    {active && i === (rounds?.length ?? 1) - 1 && <div className="cli-line"><span className="cli-prompt">❯</span><span className="cursor-blink" /></div>}
+                    {active && !(r.organ ?? []).length && i === 0 && !cli.length && <div className="cli-line cli-thought">（该圈无执行器账——如实）</div>}
+                    {!active && <div className="cli-line cli-thought">（选择真轮后,这里直播 organ 真实执行流——逐轮逐工具可见）</div>}
+                  </div>
+                </div>
+                <div className="dim" style={{ marginTop: 6 }}>
+                  {r.consumed ? `收口(圈${r.n}):rounds ${r.consumed.rounds ?? '—'} · in ${r.consumed.in ?? '—'} / out ${r.consumed.out ?? '—'} tok${r.consumed.ms != null ? ` · ${(r.consumed.ms / 1000).toFixed(1)}s` : ''}`
+                    : (i === 0 && c?.execution?.rounds != null ? `收口:rounds ${c.execution.rounds} · in ${c.execution.usage?.in ?? '—'} / out ${c.execution.usage?.out ?? '—'} tok${c.execution.ms != null ? ` · ${(c.execution.ms / 1000).toFixed(1)}s` : ''}` : `圈${r.n} 无收口账——如实`)}
+                </div>
+                {i === 0 && !rounds && c?.route?.via && <div className="dim">路由:{c.route.via === 'l1' ? 'L1 图直答(零 LLM)' : c.route.via}(判执环账缺=路由层/机械轮,如实)</div>}
               </div>
-              <div className="terminal-body" ref={termRef}>
-                {c?.execution?.note && <div className="cli-line cli-thought">{c.execution.note}</div>}
-                {cli.map((l, i) => <div key={i} className={`cli-line ${l.cls}`}>{l.html}</div>)}
-                {active && <div className="cli-line"><span className="cli-prompt">❯</span><span className="cursor-blink" /></div>}
-                {!active && <div className="cli-line cli-thought">（选择真轮后,这里直播 organ 真实执行流——逐轮逐工具可见）</div>}
+            ))}
+            {!rounds && (
+              <div className="terminal-window">
+                <div className="terminal-header">
+                  <div className="terminal-dots"><div className="terminal-dot dot-red" /><div className="terminal-dot dot-yellow" /><div className="terminal-dot dot-green" /></div>
+                  <div className="terminal-title">ca-agent — organ — {active ? String(active.id).slice(0, 18) : '80x24'}</div>
+                </div>
+                <div className="terminal-body" ref={termRef}>
+                  {c?.execution?.note && <div className="cli-line cli-thought">{c.execution.note}</div>}
+                  {cli.map((l, k) => <div key={k} className={`cli-line ${l.cls}`}>{l.html}</div>)}
+                  {active && <div className="cli-line"><span className="cli-prompt">❯</span><span className="cursor-blink" /></div>}
+                  {!active && <div className="cli-line cli-thought">（选择真轮后,这里直播 organ 真实执行流——逐轮逐工具可见）</div>}
+                </div>
               </div>
-            </div>
-            {c?.execution?.rounds != null && <div className="dim" style={{ marginTop: 6 }}>收口:rounds {c.execution.rounds} · in {c.execution.usage?.in ?? '—'} / out {c.execution.usage?.out ?? '—'} tok{c.execution.ms != null ? ` · ${(c.execution.ms / 1000).toFixed(1)}s` : ''}</div>}
+            )}
           </div>
         </div>
 
-        <div className={`step ${stepCls}`} id="s6">
+        {/* 终审环(新增拍:执行反馈回判断位,三裁可回放) */}
+        <div className={`step ${active ? 'active' : ''}`} id="srev">
+          <div className="step-title"><span>5.5 终审环 (执行结果回判断位 · 三裁:continue ⟳ / close ■ / fail ✕)</span><span>⏱️ 15s</span></div>
+          <div className="content-box">
+            {!active && <span className="dim">选择真轮后显示终审环真账…</span>}
+            {active && !(rounds ?? []).some((r) => r.review || (r.reviewEvents ?? []).length) && (
+              <div className="dim">（该轮未触发终审:branch=确定 / 路由层轮 / 机械轮——裁定面如实,不脑补）</div>
+            )}
+            {(rounds ?? []).filter((r) => r.review || (r.reviewEvents ?? []).length || r.sayLine).map((r, k) => (
+              <div key={k} style={{ marginTop: k ? 12 : 0, borderTop: k ? '1px dashed var(--tr-border)' : null, paddingTop: k ? 10 : 0 }}>
+                <div className="jud-field"><b>第 {r.n} 圈终审:</b>
+                  {r.review
+                    ? <>
+                      <span className={`branch-chip tag tag-${REVIEW_TONE[r.review.action] ?? 'blue'}`}>{r.review.action === 'continue' ? '⟳ continue' : r.review.action === 'close' ? '■ close' : '✕ fail'}:{r.review.action}</span>
+                      <span style={{ marginLeft: 8 }}>{r.review.why}</span>
+                      <span className="dim" style={{ marginLeft: 8 }}>roundsUsed {r.review.roundsUsed ?? '—'}{r.review.src ? ` · ${r.review.src}` : ''}{r.reviewRow?.usage ? ` · in ${r.reviewRow.usage.input_tokens}/out ${r.reviewRow.usage.output_tokens} tok` : ''}</span>
+                    </>
+                    : <span className="dim">（圈级无终审行——守门拍见第 4 拍）</span>}
+                </div>
+                {r.reviewRow?.expConflict && (
+                  <div className="scar"><b>{fmtTs(r.reviewRow.ts)} · 经验冲突疤(exp-conflict 落账降权)</b><span>{r.reviewRow.expConflict.chainId}:{String(r.reviewRow.expConflict.why ?? '')}</span></div>
+                )}
+                {(r.reviewEvents ?? []).length > 0 && r.review?.action === 'continue' && (rounds?.length ?? 1) === r.n && (
+                  <div className="loop-chip" style={{ borderColor: 'var(--tr-red)', color: 'var(--tr-red)', background: 'rgba(248,81,73,.06)' }}>⟳ 终审裁 continue,但下一圈未在账上起跑(守门拍拦截——可见,不粉饰)</div>
+                )}
+                {(r.sayLine || (r.reviewRow?.line && r.review?.action === 'close')) && (
+                  <div className="mouth-line">🗣 判断位的嘴(不经执行器):{r.sayLine ?? r.reviewRow.line}</div>
+                )}
+                {r.reviewRow?.line && r.review?.action === 'continue' && <div className="inner-speech" style={{ fontSize: 14, marginTop: 6 }}>换装新指令:{r.reviewRow.line}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className={`step ${active ? 'active' : ''}`} id="s6">
           <div className="step-title"><span>6. 信用分配与回写 (自我演化)</span><span>⏱️ 5ms</span></div>
           <div className="content-box">
             {c?.credit?.outcome
@@ -272,15 +414,29 @@ export default function Trace({ onClose }) {
             {c?.credit?.dP && <div>📉 势差变化 ΔP:{['red', 'blue', 'green', 'social', 'risk'].filter((k) => c.credit.dP[k] != null).map((k) => <span key={k}> {k === 'red' ? '红' : k === 'blue' ? '蓝' : k === 'green' ? '绿' : k === 'social' ? '社交' : '风险'} {c.credit.dP[k] > 0 ? '⬆️' : c.credit.dP[k] < 0 ? '⬇️' : '➖'}{Math.abs(c.credit.dP[k])}</span>)}</div>}
             {c?.reply?.usage && <div className="dim">回执烧量:in {c.reply.usage?.input_tokens ?? '—'} / out {c.reply.usage?.output_tokens ?? '—'} tok</div>}
             {c && <div className="dim">📝 记忆回写:情节→HCSR 图(recordTurn/use 后重组;物证=memory/store/experience-graph.hcsr)</div>}
+            {lessons.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div className="dim">伤疤墙({lessons.length} 条——判→结果双反馈落账,本轮钥匙命中):</div>
+                {lessons.map((l, k) => (
+                  <div key={k} className={`scar ${l.kind === 'closed' ? 'scar-ok' : ''} ${l.kind === 'reinforce' ? 'scar-gold' : ''}`}>
+                    <b>{fmtTs(l.ts)} · {LESSON_LABEL[l.kind] ?? l.kind}</b>
+                    <span>{String(l.why ?? '').slice(0, 90)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className={`step ${stepCls}`} id="s7">
+        <div className={`step ${active ? 'active' : ''}`} id="s7">
           <div className="step-title"><span>7. 社交面具 / 对外输出</span><span>⏱️ 200ms</span></div>
           <div className="content-box">
-            <div className="social-inner"><i>{innerTxt ? `·[内语·真实] ${innerTxt.replace(/^·\[内语\]\s*/, '')}` : (c ? '（该轮无内语行——静默轮,如实显示）' : '')}</i></div>
+            <div className="social-inner"><i>{mindLine0 ? `·[内语·真实] ${mindLine0.replace(/^·\[内语\]\s*/, '')}` : (c ? '（该轮无内语行——静默轮,如实显示）' : '')}</i></div>
             {active && !silent && (
-              <div className="reply-box"><div className="user-reply">{replyTxt || '…'}</div><div style={{ clear: 'both' }} /></div>
+              <div className="reply-box">
+                {sayLine && <div className="dim" style={{ marginBottom: 6 }}>↑ 收束句=判断位的嘴(终审 close,不经执行器)</div>}
+                <div className="user-reply">{replyTxt || '…'}</div><div style={{ clear: 'both' }} />
+              </div>
             )}
             {active && silent && <div className="silent-notice">（静默执行，系统未对外部输出任何内容——内部轮或零势差轮,真实账面如此）</div>}
           </div>

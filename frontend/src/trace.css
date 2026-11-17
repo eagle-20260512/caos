@@ -79,5 +79,34 @@
 .trace-page .cursor-blink { display: inline-block; width: 8px; height: 15px; background-color: var(--tr-text); animation: tr-blink 1s step-end infinite; vertical-align: middle; }
 @keyframes tr-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
+/* ===== 环形综合评判重设计(2026-11-17 Eagle 夜令:无内因外因,判→闸→执→审多圈) ===== */
+/* 拍卡:同款结构,左边色=拍类(紫=判断位/黄=闸/蓝=执行/绿=反馈/红=裁决),非内因外因 */
+.trace-page .ring { width: 100%; max-width: 1000px; display: flex; flex-direction: column; gap: 14px; }
+.trace-page .round { border: 1px solid var(--tr-border); border-radius: 10px; padding: 16px 14px 6px; background: rgba(22,27,34,.55); position: relative; }
+.trace-page .round-badge { position: absolute; top: -11px; left: 14px; background: var(--tr-panel); border: 1px solid var(--tr-border); border-radius: 12px; padding: 2px 12px; font-size: 12px; color: var(--tr-text); font-weight: bold; }
+.trace-page .round-badge.live { color: var(--tr-green); border-color: var(--tr-green); box-shadow: 0 0 8px rgba(63,185,80,.25); }
+.trace-page .beat { background: #010409; border: 1px solid var(--tr-border); border-left: 4px solid var(--tr-border); border-radius: 6px; padding: 12px 14px; margin-top: 12px; animation: tr-fade .45s ease-out both; }
+.trace-page .beat-mind { border-left-color: var(--tr-purple); }
+.trace-page .beat-gate { border-left-color: var(--tr-yellow); }
+.trace-page .beat-exec { border-left-color: var(--tr-blue); }
+.trace-page .beat-back { border-left-color: var(--tr-green); }
+.trace-page .beat-verdict { border-left-color: var(--tr-red); }
+.trace-page .beat-title { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.trace-page .loop-chip { display: flex; align-items: center; gap: 10px; color: var(--tr-purple); font-weight: bold; font-size: 13px; padding: 10px 14px; margin-top: 12px; border: 1px dashed var(--tr-purple); border-radius: 10px; background: rgba(188,140,255,.06); }
+.trace-page .slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; margin-top: 10px; }
+.trace-page .slot-item { background: rgba(22,27,34,.8); border: 1px solid var(--tr-border); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+.trace-page .slot-item b { color: var(--tr-yellow); display: block; margin-bottom: 4px; font-size: 12px; }
+.trace-page .slot-item span { color: var(--tr-text); word-break: break-all; white-space: pre-wrap; }
+.trace-page .jud-field { margin-top: 6px; font-size: 13px; }
+.trace-page .jud-field b { color: var(--tr-yellow); }
+.trace-page .branch-chip { display: inline-block; padding: 2px 10px; }
+.trace-page .scar { display: inline-flex; flex-direction: column; border: 1px solid rgba(248,81,73,.3); background: rgba(248,81,73,.08); border-radius: 6px; padding: 6px 10px; margin: 4px 6px 0 0; font-size: 12px; max-width: 100%; }
+.trace-page .scar-ok { border-color: rgba(63,185,80,.3); background: rgba(63,185,80,.08); }
+.trace-page .scar-gold { border-color: rgba(210,153,34,.3); background: rgba(210,153,34,.08); }
+.trace-page .scar b { font-size: 11px; color: #8b949e; margin-bottom: 2px; }
+.trace-page .scar span { color: var(--tr-text); word-break: break-all; }
+.trace-page .mouth-line { background: rgba(88,166,255,.12); border: 1px solid rgba(88,166,255,.4); color: #fff; padding: 12px 16px; border-radius: 8px; margin-top: 10px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+@keyframes tr-fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
 /* demo :root 变量(隔离命名,不撞 app 主题) */
 .trace-page, :root { --tr-bg: #0d1117; --tr-panel: #161b22; --tr-text: #c9d1d9; --tr-border: #30363d; --tr-red: #f85149; --tr-blue: #58a6ff; --tr-green: #3fb950; --tr-purple: #bc8cff; --tr-yellow: #d29922; --tr-orange: #d2691e; }
