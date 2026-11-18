@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// ca-autophagy.mjs — 冗余清理效应器(2026-11-09 用户令:低能耗状态无感清废料;纯机械零 LLM)
 // 触发:主循环空闲(队列无 pending)时由 ca-loop 调 sweep();节流:state/autophagy.json lastSweepTs 1h 内不重扫。
 // 打分:score = bytes × ageDays(又老又大先清);批帽=单次最多 scope 总字节 1% 且 ≤50 文件(防 I/O 阻塞)。
 // 软删除:mv → state/.trash/<ts>-<名>,行入 ledgers/autophagy-ledger.jsonl;TTL(默认 24h)后真删。
-// EPERM/EXDEV 等权限错=记 abandoned:true 一次性跳过,永不重试(用户令「遇权限错误直接跳过并放弃重试」)。
 // 红线:.bak-caedit(验证证据)、.jsonl 账本、.git 永不清理(append-only 审计面);scope 只收可再生废料。
 import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, statSync, rmSync, appendFileSync } from 'node:fs';
 const mv = renameSync; // 软删除=改名进 .trash(同 fs,原子)
@@ -22,10 +20,13 @@ export const DEFAULT_CONFIG = {
   batchPct: 0.01,          // 单次批帽=scope 总字节 1%
   trashTtlH: 24,
   minAgeH: 6,              // 6h 内的新文件不动(防止清掉正在用的流式残渣)
-  scopes: [                // 只收可再生废料;账本/证据面禁入
+  scopes: [                // 只收可再生废料;账本/证据面禁入(下三行=2026-11-12 残尸之痛扩面:只收 .tmp 后缀,真账不碰)
     { dir: 'state/organ-spill', pattern: /\.log$/ },
     { dir: 'state/organ-stream', pattern: /\.jsonl$/ },
     { dir: 'state', pattern: /\.tmp-\d+$/ }, // 原子写残件(进程死了没 rename 成的)
+    { dir: 'state', pattern: /\.tmp$/ },     // 旧式 .tmp 残件(report-draft 实锤;minAgeH=6h 护活写手)
+    { dir: '.', pattern: /\.tmp(-\d+)?$/ },  // 根面残尸(auto-verify L() 形参bug 曾夜夜漏)
+    { dir: 'ledgers', pattern: /\.tmp(-\d+)?$/ }, // 账面残尸(目录+a 时代 322 具;真账 .jsonl 不入 pattern)
   ],
 };
 
@@ -117,7 +118,7 @@ export function sweep({ now = Date.now(), dryRun = false, config = null } = {}) 
   return out;
 }
 
-function writeState(s) { try { mkdirSync(path.dirname(SWEEP_STATE), { recursive: true }); const t = `${SWEEP_STATE}.tmp-${process.pid}`; writeFileSync(t, JSON.stringify(s) + '\n'); renameSync(t, SWEEP_STATE); } catch { /* */ } }
+function writeState(s) { const t = `${SWEEP_STATE}.tmp-${process.pid}`; try { mkdirSync(path.dirname(SWEEP_STATE), { recursive: true }); writeFileSync(t, JSON.stringify(s) + '\n'); renameSync(t, SWEEP_STATE); } catch { try { rmSync(t, { force: true }); } catch { /* 残尸兜底交下轮清扫 */ } } } // 2026-11-12 补失败自清扫
 
 // idle 触发节流:主循环空闲时调这个;1h 内不重扫
 export function sweepIdle({ now = Date.now() } = {}) {
@@ -136,3 +137,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   else if (cmd === 'status') console.log(JSON.stringify({ state: readJson(SWEEP_STATE, null), config: readJson(CONFIG, null) }));
   else console.error('用法: ca-autophagy.mjs sweep|dry-run|status');
 }
+

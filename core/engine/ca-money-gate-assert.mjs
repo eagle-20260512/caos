@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// 钱闸前置可重复断言:钱闸是否真在判定链最前 + P1 词边界 + 钱包未穿时放行。
-// 立项因由:旧式 node -e 内联检查曾把锚点取到注释(重复文本)导致误报「前置=false」——检查脚本本身不可信比闸坏更糟。
+// [2026-11-06 主线·钱闸前置] 可重复断言:钱闸是否真在判定链最前 + P1 词边界 + 钱包未穿时放行。
+// 立项因由:上一版用 node -e 内联检查,锚点取到注释(重复文本)导致误报「前置=false」——检查脚本本身不可信比闸坏更糟。
 // 锚点纪律:本脚本所有锚点先断言唯一性(grep 计数=1),不唯一直接 FAIL,禁静默取首个匹配。
-// 本断言取代旧锚点式检查上生产岗(旧锚=代码形态,被 _moneyExempt 同列例外修法撑爆,会全队列绝食)。
-//   zerosrc 段确定性化:注入烧穿钱包(CA_WALLET_ORGAN 假账),不再依赖真钱包恰好烧穿;
-//   锁存/留痕全走 CA_THROTTLE_LOCK/LEDGER 沙箱,断言零生产副作用。
-// 用法: node engine/ca-money-gate-assert.mjs   → 末行 MONEY_GATE_FIRST=ok 且 allowed=true 即应验;非 0 退出=落空。
+// [2026-11-07 根修·接管线] 本断言今日起替 ca-money-first-assert 上生产岗(旧锚=代码形态,被 _moneyExempt
+//   同列例外修法撑爆,全队列绝食 8 分钟实弹)。zerosrc 段确定性化:注入烧穿钱包(CA_WALLET_ORGAN 假账),
+//   不再依赖真钱包恰好烧穿;锁存/留痕全走 CA_THROTTLE_LOCK/LEDGER 沙箱,断言零生产副作用。
+// 用法: node loop/ca-money-gate-assert.mjs   → 末行 MONEY_GATE_FIRST=ok 且 allowed=true 即应验;非 0 退出=落空。
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -22,7 +22,7 @@ const uniq = (needle) => {
   return hits[0];
 };
 // 钱闸落点允许「多处」:判定链上可能有多级钱因短路(L1 烧穿 / L3 阶梯),全须早于水位阀。
-// 纪律:不许退回 uniq —— 锚 stage:'money-first' 命中多处曾被机械账判 fragile 拒收。
+// 纪律:不许退回 uniq —— 上一轮正是锚 stage:'money-first' 命中 2 处被机械账判 fragile 拒收。
 const all = (needle) => {
   const hits = code.map((l, i) => (l.includes(needle) ? i + 1 : 0)).filter(Boolean);
   if (!hits.length) throw new Error(`锚点不存在(0处): ${needle}`);
@@ -56,21 +56,31 @@ for (const [k, want] of Object.entries(p1)) {
   if (got !== want) fails.push(`isP1Pass('${k}')=${got} 期望 ${want}`);
 }
 
+// [2026-11-18 补负控·预算锁 ¥null] 锁金额为空时理由不得出现 ¥null/¥undefined/NaN;
+// 盲闸锁必须如实说"钱包读数不可得",不许把读数坏伪装成"已烧穿";out/money 两种历史字段都要能读。
+const blindDesc = m.describeLock({ date: '2026-11-18', out: null, money: null, cap: 0, ts: '2026-11-18T00:39:47.993Z', why: 'wallet-blind' });
+if (/¥null|¥undefined|¥NaN/.test(blindDesc)) fails.push(`盲闸锁理由出现空金额: ${blindDesc}`);
+if (!/钱包读数不可得|盲闸/.test(blindDesc)) fails.push(`盲闸锁理由未标明读数坏: ${blindDesc}`);
+const normalDesc = m.describeLock({ date: '2026-11-18', out: 5, cap: 5, ts: 'x' });
+if (!/¥5≥5/.test(normalDesc)) fails.push(`正常锁理由丢失金额: ${normalDesc}`);
+const moneyKeyDesc = m.describeLock({ date: '2026-11-18', out: null, money: 3, cap: 5, ts: 'x' });
+if (!/¥3≥5/.test(moneyKeyDesc)) fails.push(`money 字段锁理由未兼容: ${moneyKeyDesc}`);
+
 // 端到端:钱包未穿时应放行(若真穿穿=应被拦,此时不判失败,只标注)
 let gate = null;
 try { gate = m.throttleGate({ surface: 'assert', purpose: 'P2:money-gate-assert' }); } catch (e) { fails.push('throttleGate 抛错: ' + e.message); }
 
-// 检查脚本自身必须可判「零烧钱源」形态:
+// [2026-11-07 补刀·pred-reject fragile-cmd 第三次] 检查脚本自身必须可判「零烧钱源」形态:
 //   预言只能是 cmd 型(check = {cmd, by},无 pattern 散文),且断言行必须机器可读。
 //   零源 = readValve() 读不到(文件缺/字段 null)时钱闸是否仍拦 —— 用注入 env 模拟,不动真钱包。
-// zerosrc 确定性化:靠真钱包恰好烧穿才过的写法=环境色盲预言机(钱包有钱=恒 FAIL)。
+// [2026-11-07 根修] zerosrc 确定性化:旧版靠真钱包恰好烧穿才过(钱包有钱=恒 FAIL=环境色盲预言机)。
 //   真不变量=「钱烧穿时,水位阀读不到也必须拦」(钱闸前置不依赖阀读数)——注入假烧穿账(CA_WALLET_ORGAN)
 //   + 阀失明(CA_VALVE_OVERLAY=none),锁存/留痕已在 import 前沙箱化,断言零生产副作用。
 let zeroSrc = null;
 const SBX_ORGAN = path.join(os.tmpdir(), `ca-assert-organ-${process.pid}.jsonl`);
 try {
   process.env.CA_VALVE_OVERLAY = 'none';
-  writeFileSync(SBX_ORGAN, JSON.stringify({ ts: new Date().toISOString(), model: 'deepseek-chat', in: 2e8, out: 2e8, cacheRead: 0 }) + '\n'); // 注入额须大到烧穿任何合法当日额度上限(额度上调后旧假账穿不透=假 FAIL 的教训)
+  writeFileSync(SBX_ORGAN, JSON.stringify({ ts: new Date().toISOString(), model: 'deepseek-chat', in: 2e8, out: 2e8, cacheRead: 0 }) + '\n'); // ¥2000 刊例烧穿任何合法当日额度(配置面封顶 1000;2026-11-07 额度升 20 后旧 ¥10 假账穿不透=假 FAIL)
   process.env.CA_WALLET_ORGAN = SBX_ORGAN;
   const g2 = m.throttleGate({ surface: 'assert-zerosrc', purpose: 'P2:money-gate-assert' });
   zeroSrc = { allowed: !!g2?.allowed, reason: String(g2?.reason ?? ''), stage: g2?.stage ?? null };
@@ -84,6 +94,7 @@ try {
   try { rmSync(SBX_ORGAN, { force: true }); rmSync(SBX_LOCK, { force: true }); rmSync(SBX_LEDGER, { force: true }); } catch { /* 清沙箱渣失败不挡判词 */ }
 }
 console.log(`ANCHOR money-first@[${moneyHits.join(",")}] readValve@${valveAt}`);
+console.log(`LOCKDESC blind=${blindDesc}`);
 console.log(`ZEROSRC allowed=${zeroSrc?.allowed} reason=${zeroSrc?.reason}`);
 console.log(`isP1Pass matrix ${JSON.stringify(p1)} -> OK=${fails.every((f) => !f.startsWith('isP1Pass'))}`);
 console.log(`gate allowed=${gate?.allowed} reason=${gate?.reason}`);

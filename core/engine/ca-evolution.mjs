@@ -200,6 +200,8 @@ export function recordWin({ task, domain, why, evidence, verify, note, now = Dat
   pool.wins = [...(pool.wins ?? []), win];
   ensureDir(); writePool(pool);
   const g = computeGap(pool);
+  // 落痕双账(2026-11-10 Eagle P2 令「每次进步必须落账」):friction 之外同步落 loop 账,审计面对证面
+  try { appendFileSync(path.join(CA, 'ledgers', 'loop.jsonl'), JSON.stringify({ ts: win.ts, event: 'evolution-win', gap: g.gap, domain, task: win.task, fingerprint, evidenceN: win.evidence.length }) + '\n'); } catch { /* 落痕败不毁胜绩 */ }
   friction({ ts: win.ts, kind: 'evolution-win', surface: domain, detail: `演化胜绩(势差→${g.gap}):${win.task};why:${win.why}`, evidence: hashes.map((h) => `${h.path}#${h.sha256.slice(0, 8)}`).join(','), verified: true });
   return { ok: true, gap: g.gap, wins: g.wins, fingerprint };
 }

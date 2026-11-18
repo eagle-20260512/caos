@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 
 // CA 家账面板(2026-11-17 Eagle 令:顶部设置左侧 CA 标签页)——读 /api/ca/summary(只读聚合,60s 轮询)
 // 数据源=CA 家(/home/ca-agent)真实账本:势差五维/钱包/验收三条/观测器/审计/PE 校准/蒸馏灰度/生存债。
@@ -15,24 +15,10 @@ const Card = ({ title, children }) => (
   <div className="ca-card"><h3>{title}</h3>{children}</div>
 );
 
-export default function CaPanel() {
-  const [s, setS] = useState(null);
-  const [err, setErr] = useState(null);
-  useEffect(() => {
-    let dead = false;
-    const pull = async () => {
-      try {
-        const r = await fetch('/api/ca/summary');
-        const j = await r.json();
-        if (!dead) { setS(j); setErr(null); }
-      } catch (e) { if (!dead) setErr(String(e.message ?? e)); }
-    };
-    pull();
-    const t = setInterval(pull, 60000);
-    return () => { dead = true; clearInterval(t); };
-  }, []);
-
-  if (err) return <div className="ca-panel"><p className="mini">CA 家账暂不可达:{err}(backend 8321 未起或家内只读面断)</p></div>;
+export default function CaPanel({ summary = null, error = null }) {
+  const s = summary;
+  const err = error;
+  if (err) return <div className="ca-panel"><p className="mini">CA 家账暂不可达:{err}(后端只读面断;状态面仍走 SSE)</p></div>;
   if (!s) return <div className="ca-panel"><p className="mini">读取 CA 家账…</p></div>;
   const pv = s.pvector;
   const acc = s.acceptance;

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ca-criterion-drift.mjs — 判据修改方向账(预言准入侧对账件)
+// ca-criterion-drift.mjs — 判据修改方向账(2026-11-08 用户批「下窗做」;压力-稳态评审改动2的准入侧正解)
 // 机理:预言准入面每收一条新预言,与「同题前任」(wkey 相同,或规范化 about 相同)对账——
 //   判据(check.cmd 数值阈值/check.by 死期)变难=收窄(narrow),变易=放宽(loosen);
 //   签名改写不可比=rewritten(改写可藏放宽,外部对账件);同题不同判据=准入侧唯一对账点。
@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, exi
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const PRED = path.join(CA, 'ledgers', 'predictions.jsonl');
 const DRIFT = path.join(CA, 'ledgers', 'criterion-drift.jsonl');
 const HEALTH = path.join(CA, 'state', 'criterion-health.json');

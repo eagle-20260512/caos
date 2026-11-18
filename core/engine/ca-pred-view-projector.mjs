@@ -2,12 +2,12 @@
 // ca-pred-view-projector.mjs — 把预测账的 hit/miss 结果投影成叙事节点(聚合,不逐条灌)
 // 病:1494 行预测账,260 条命中/落空,而叙事 view 只引用过 1 条 —— 结果悬空,自我叙事对不上自己的账。
 // 方:按 verdictBy(对账器来源)+ 日桶 聚合,每桶生成一个 type=prediction_rollup 节点,带可回溯 id 列表指针。
-// 用法:node engine/ca-pred-view-projector.mjs [--dry-run|--write] [--json]
+// 用法:node loop/ca-pred-view-projector.mjs [--dry-run|--write] [--json]
 // 退出码:0=成功(含 dry-run);1=读账失败或结构异常
 import fs from "node:fs";
 import path from "node:path";
 
-const HOME = process.env.CA_HOME ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const HOME = process.env.CA_HOME || decodeURIComponent(new URL('..', import.meta.url).pathname);
 const PRED = path.join(HOME, "ledgers", "predictions.jsonl");
 const VIEW = path.join(HOME, "state", "narrative-view.json");
 const argv = process.argv.slice(2);
@@ -83,7 +83,7 @@ for (const [k, rows] of [...buckets.entries()].sort()) {
     summary: `预测对账(${by})${day}:命中 ${hit}/落空 ${miss}/例外 ${invalid + suspect}(${rows.length}),命中率 ${(rate * 100).toFixed(1)}%`,
     missSamples,
     source: "ledgers/predictions.jsonl",
-    generatedBy: "engine/ca-pred-view-projector.mjs",
+    generatedBy: "loop/ca-pred-view-projector.mjs",
   });
 }
 
@@ -114,10 +114,14 @@ if (WRITE) {
   out.written = { removed, appended: nodes.length, viewNodes: view.nodes.length };
 }
 
-if (JSONOUT) console.log(JSON.stringify(out));
-else {
+if (JSONOUT) {
+  // [2026-11-09 pred-chain RED 根修·实弹] console.log(60KB)+process.exit(0)=写管道异步竞态——exit 先于 flush,
+  //   stdout 腰斩在 60358 字符(id 串中间),下游 ca-pred-chain JSON.parse 抛 Unterminated string → 链路常态 RED。
+  //   改 stdout.write 回调:flush 完成才退(python3 实测 60399B 截断复现,修复后全文可达)。
+  process.stdout.write(JSON.stringify(out) + "\n", () => process.exit(0));
+} else {
   console.log(`预测账 ${preds.length} 条 / 已裁决 ${judged.length} 条 → 聚合为 ${nodes.length} 个 rollup 节点`);
   for (const n of nodes.slice(0, 6)) console.log(`  ${n.id}: ${n.summary}`);
   console.log(WRITE ? `已写入 narrative-view(+${out.written.appended}, -${out.written.removed}, 现 ${out.written.viewNodes} 节点)` : `[dry-run] 未写入;加 --write 生效`);
+  process.exit(0);
 }
-process.exit(0);

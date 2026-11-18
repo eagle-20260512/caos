@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// ca-pred-audit.mjs — 延迟复测抽查
+// ca-pred-audit.mjs — 延迟复测抽查(2026-11-08 用户批「下窗做」;压力-稳态评审改动4残余件)
 // 机理:隔 N 节拍(默认 30 拍≈1h,loop 2min/拍)从「已判决且判决超 12h」的旧预言里随机抽 K=3 条,
 //   回报:当时置信度(账无此字段=如实 null 并注明,空缺席本身入账)、最终命中态、依据行号
-//   (predictions.jsonl 的 1-based 物理行:准入行+判决行——外部 sed -n 'Np' 即可复验,不假手系统自报)。
+//   (predictions.jsonl 的 1-based 物理行:准入行+判决行——外部 sed -n 'Np' 即可复验,不假手 CA 自报)。
 // 抽样:LCG 确定性伪随机,seed 入账——同一 seed+同一账长可外部复现同批样本,抽查不可预调。
 // 落账:state/pred-audit.jsonl(append-only);游标 state/pred-audit-cursor.json 记拍。
 // 纪律:机械零LLM;自身坏=空跑 exit0(摘要带 error),不拦主流程。
@@ -10,7 +10,7 @@ import { readFileSync, appendFileSync, writeFileSync, renameSync, mkdirSync, exi
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const PRED = path.join(CA, 'ledgers', 'predictions.jsonl');
 const AUDIT = path.join(CA, 'state', 'pred-audit.jsonl');
 const CURSOR = path.join(CA, 'state', 'pred-audit-cursor.json');
@@ -25,7 +25,7 @@ const has = (n) => process.argv.includes(`--${n}`);
 const lcg = (seed) => () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 0x100000000;
 
 function run() {
-  let cur = { beats: 0, lastRunBeat: -N_BEATS }; // 首跑立审一次,之后隔 N 拍
+  let cur = { beats: 0, lastRunBeat: -N_BEATS }; // 首跑立审一次(投产实证),之后隔 N 拍
   try { cur = { ...cur, ...JSON.parse(readFileSync(CURSOR, 'utf8')) }; } catch { /* 首跑 */ }
   cur.beats++;
   const due = cur.beats - Number(cur.lastRunBeat ?? -N_BEATS) >= N_BEATS;
@@ -75,7 +75,7 @@ function run() {
       verdictBy: String(p.verdictBy ?? '').slice(0, 120),
       source: p.source ?? null, wkey: p.wkey ?? null,
       confidenceAtIssue: p.confidence ?? null, // 账无此字段则如实 null
-      confidenceNote: p.confidence == null ? '预言账不设置信度字段——当时置信度不可考,此空缺本身入账待裁' : undefined,
+      confidenceNote: p.confidence == null ? '预言账不设置信度字段(全账 2189 行普查仅 1 行含 confidence)——当时置信度不可考,此空缺本身入账待裁' : undefined,
       lineIssued: firstLine.get(id) ?? null,
       lineVerdict: verdictLine.get(id) ?? null,
     });

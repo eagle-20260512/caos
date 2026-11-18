@@ -7,7 +7,8 @@ import { registerLogs } from './routes/logs.js';
 import { registerAdmin } from './routes/admin.js';
 import { registerConfig } from './routes/config.js';
 import { registerP2P } from './routes/p2p.js';
-import { registerCa } from './routes/ca.js';
+import { registerCa } from './routes/ca.js'; // CA 家账读面(2026-11-17 Eagle 令:3001 顶部设置左侧 CA 标签页;只读聚合)
+import { registerTrace } from './routes/trace.js'; // 全链路追踪聚合(2026-11-17 Eagle 令:全链路追踪.txt+demo 100% 真实现;只读)
 
 const CA = process.env.CA_HOME ?? '/ca';
 const PORT = Number(process.env.PORT ?? 8321);
@@ -33,7 +34,8 @@ await registerLogs(app, { CA });
 await registerAdmin(app, { CA, adminOk });
 await registerConfig(app, { CA, adminOk });
 await registerP2P(app, { CA });
-await registerCa(app, { CA }); // CA 家账读面(2026-11-17 Eagle 令:3001 顶部设置左侧 CA 标签页;只读聚合)
+await registerCa(app, { CA });
+await registerTrace(app, { CA });
 
 app.get('/api/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 

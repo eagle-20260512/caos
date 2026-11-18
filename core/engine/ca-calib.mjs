@@ -9,12 +9,12 @@
 //   各自读 state/calib/<name>.json,读坏=回退静态先验(fail-safe=更紧更省)。
 // 第四件(2026-11-08 v1.4 适配批):销账对账 pain-resolution(审计非校准;pain 办结须配消费行,凭空销=污染公示)。
 // 节流:自评估 ≤1次/时(state/calib/.last-run);自身坏=exit0 带 error,不拦主流程。
-// 复现:node scripts/ca-calib.mjs --explain <name> 打印规格/现值/证据窗/账源,外部可独立重算打叉。
-import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
+// 复现:node loop/ca-calib.mjs --explain <name> 打印规格/现值/证据窗/账源,外部可独立重算打叉。
+import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const LOOP = path.join(CA, 'ledgers', 'loop.jsonl');
 const DOPA = path.join(CA, 'ledgers', 'dopamine.jsonl');
 const CALIB_DIR = path.join(CA, 'state', 'calib');
@@ -175,7 +175,41 @@ function auditPainResolution(cutoff) {
   const doing = String(cursor.doing ?? '');
   const qLines = readJsonl(QUEUE);
   const loopAll = readJsonl(LOOP);
-  const consumedIds = new Set(loopAll.filter((e) => e.event === 'consumed' || e.event === 'compile-fail').map((e) => String(e.id ?? '')));
+  // 2026-11-09 批2 修(T2-γB,用户令「不准再报假警」)——旧审计三盲区:
+  //  ①批销账只带 head:新账行带 members(ca-loop 同批修),旧 batch-formed/batch-consumed 行用 lines→队 id 回溯;
+  //  ②mechanical/check-early-pass 也是合法销账(有 id 有账),此前不计;
+  //  ③内语/梦轮家族的消化证据落 outcomes.jsonl(ev/event 键),loop 账只见 head——跨账收割。
+  const queueIdByLine = new Map(qLines.map((ev, idx) => [idx + 1, String(ev?.id ?? '')]));
+  const consumedIds = new Set();
+  const batchCovered = new Set();
+  // 批3(2026-11-09 破案令):第三蒸发路径=账本轮换——batch 消费证据落在 ledgers/archive/loop-*.jsonl,
+  //   审计只读现行账=把已消化成员误判孤儿(实弹:7 笔孤儿全数在 archive 三笔 batch-formed/consumed 内)。
+  //   收割面=现行账+全部档案账,同规则。
+  const loopSources = [loopAll];
+  try {
+    const archDir = path.join(CA, 'ledgers', 'archive');
+    if (existsSync(archDir)) {
+      for (const f of readdirSync(archDir).filter((n) => n.startsWith('loop-') && n.endsWith('.jsonl'))) {
+        loopSources.push(readJsonl(path.join(archDir, f)));
+      }
+    }
+  } catch { /* 档案读不了=退回现行账,不毁校准 */ }
+  for (const rows of loopSources) {
+    for (const e of rows) {
+      if (['consumed', 'compile-fail', 'mechanical', 'check-early-pass', 'batch-consumed'].includes(e.event)) {
+        if (e.id != null) consumedIds.add(String(e.id));
+        if (e.head) consumedIds.add(String(e.head));
+        if (Array.isArray(e.members)) for (const m of e.members) consumedIds.add(String(m));
+      }
+      if ((e.event === 'batch-formed' || e.event === 'batch-consumed') && Array.isArray(e.lines)) {
+        for (const ln of e.lines) { const id = queueIdByLine.get(Number(ln)); if (id) batchCovered.add(id); }
+      }
+    }
+  }
+  for (const o of readJsonl(path.join(CA, 'ledgers', 'outcomes.jsonl'))) {
+    const oid = o.ev ?? o.event;
+    if (oid != null) consumedIds.add(String(oid));
+  }
   const anomalies = [];
   let painsDone = 0;
   for (let i = 0; i < qLines.length; i++) {
@@ -186,7 +220,7 @@ function auditPainResolution(cutoff) {
     const eid = String(ev.id ?? `line-${i}`);
     if (eid === doing) continue;
     painsDone++;
-    if (!consumedIds.has(eid)) anomalies.push({ line: i + 1, id: eid });
+    if (!consumedIds.has(eid) && !batchCovered.has(eid)) anomalies.push({ line: i + 1, id: eid });
   }
   return { kind: 'pain-resolution', windowH: WINDOW_H, painsDone, anomalyN: anomalies.length, anomalies: anomalies.slice(0, 10) };
 }

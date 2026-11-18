@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ca-pain-toll.mjs — 痛觉不应期(定位:这不是规则,这是物理法则)
+// ca-pain-toll.mjs — 痛觉不应期(2026-11-08 用户令:「这不是规则,这是物理法则」)
 // 机理(信息热力学,非外在死规则):痛觉不免费——每次负反馈(miss/reject)都收电费,
 //   同一对象反复负反馈 → 成本指数翻倍(0.10→0.20→0.40→0.80→1.60,2^min(repeat,4));
 //   当日落空率>50%(≥10 判)再 ×2;单票上限 ¥2 焊死。高成本逼系统对痛觉「脱敏」,
@@ -9,16 +9,16 @@
 // 纪律:机械零LLM;收费器自身坏=免单不拦主流程(返回 toll:0,调用方留痕)。
 import { readFileSync, writeFileSync, renameSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { localDay } from './time.mjs';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const PRED = path.join(CA, 'ledgers', 'predictions.jsonl');
 const CREDIT = path.join(CA, 'state', 'wallet-credit.json');
 const DOPA = path.join(CA, 'ledgers', 'dopamine.jsonl');
 
-// 电费基数由 ca-calib 内生(零LLM 机械统计器,先验 0.10);
-//   读坏=回退先验(fail-safe=更紧更省)。帽 ¥2 与翻倍率暂不动(一件一动,防多变量归因打架)。
+const localDay = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// [2026-11-08 P1 换芯·用户裁决] 电费基数由 ca-calib 内生(零LLM 机械统计器,先验 0.10);
+//   读坏=回退先验(fail-safe=更紧更省)。帽 ¥2 与翻倍率暂不动(P1 一件一动,防多变量归因打架)。
 const calibValue = (name, fallback) => {
   try { const v = Number(JSON.parse(readFileSync(path.join(CA, 'state', 'calib', `${name}.json`), 'utf8')).value); return Number.isFinite(v) ? v : fallback; } catch { return fallback; }
 };

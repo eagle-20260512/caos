@@ -10,7 +10,8 @@
 //   ④生产托管:禁新增守护进程(2026-11-06 令),engine.evaluate(scale) 由 metabolism 心跳每拍驱动;
 //     start()/stop() 保留给独立托管与测试(V5 原样,含全链清理)。
 // 去概念化纪律:标识符/注释只用控制论与工程词。
-import { readFileSync, appendFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, appendFileSync, writeFileSync, renameSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { painAppend } from './ca-pain-suppress.mjs'; // 突触抑制痛行入口(2026-11-12 四件治本令①,解锁批)
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,6 +23,7 @@ import { SEEDS } from './ca-proactive.mjs'; // 探索日额度单源(2026-11-09 
 import { deriveDebt } from './ca-dream-debt.mjs'; // 梦债派生真源(叶模块零依赖,2026-11-09 梦债三刀·面板刀)
 import { evolutionGap } from './ca-evolution.mjs'; // 北极星势差(2026-11-10 Eagle 最高架构令;本件=叶模块零依赖,无循环;读面纯只读)
 import { narrativeToday, selNumeric } from './ca-selection.mjs'; // 双螺旋·叙事密度(2026-11-10 Eagle 终极令;叶模块零环,只读账本)
+import { calibNum } from './lib/calib.mjs'; // 标定单源(2026-11-19 Phase 1:数字进内稳态闭环)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
@@ -30,16 +32,20 @@ const CANDS = process.env.CA_HOMEOSTASIS_CANDS || path.join(CA, 'ledgers', 'dopa
 const STATE = process.env.CA_HOMEOSTASIS_STATE || path.join(CA, 'state', 'homeostasis.json');
 const REGISTRY_FILE = process.env.CA_HOMEOSTASIS_REGISTRY || path.join(CA, 'data', 'homeostasis-registry.json');
 
-export const SENSOR_TIMEOUT_MS = 2000;   // V5:传感器采集超时
-export const EFFECTOR_TIMEOUT_MS = 5000; // V5:效应器超时
+// 数字之家=memory/store/calib.json(2026-11-19 Phase 1 内稳态统一律;代码不留无出处拍数)
+const K = (key, fb) => calibNum(key, fb, CA);
+export const SENSOR_TIMEOUT_MS = K('homeostasis_sensor_timeout_ms', 2000);   // 兼容导出;运行期用 K()
+export const EFFECTOR_TIMEOUT_MS = K('homeostasis_effector_timeout_ms', 5000); // 兼容导出;运行期用 K()
 
 // V10 P3-2(2026-11-09 用户审读落地):特化错误类,把"被中断"与"执行失败"分开。
 // 中止不是效应器的错——若计进退避,failureCounts 会被 stop() 反复抬高,健康指标本身被污染。
 export class EffectorAbortedError extends Error {
   constructor(msg = 'Effector aborted') { super(msg); this.name = 'EffectorAbortedError'; }
 }
-export const CRITICAL_RETRIGGER_MS = 5000; // V5:CRITICAL 停留时的最小重触发间隔
-export const BACKOFF_BASE_MS = 1000, BACKOFF_CAP_MS = 60000, BACKOFF_MAX_FAILS = 5; // V5:1s 起 ×2,帽 60s
+export const CRITICAL_RETRIGGER_MS = K('homeostasis_critical_retrigger_ms', 5000); // 兼容导出
+export const BACKOFF_BASE_MS = K('homeostasis_backoff_base_ms', 1000);
+export const BACKOFF_CAP_MS = K('homeostasis_backoff_cap_ms', 60000);
+export const BACKOFF_MAX_FAILS = K('homeostasis_backoff_max_fails', 5);
 
 // ── 传感器注册表(引擎 binding;全部只读,禁 LLM)──
 const tailLines = (p, n) => {
@@ -47,7 +53,7 @@ const tailLines = (p, n) => {
 };
 const countLast24h = (p, filter) => {
   try {
-    const cut = Date.now() - 24 * 3600e3; let n = 0;
+    const cut = Date.now() - K('homeostasis_friction_window_hours', 24) * 3600e3; let n = 0;
     for (const l of readFileSync(p, 'utf8').split('\n').filter(Boolean)) {
       try { const o = JSON.parse(l); if (Date.parse(o.ts ?? '') >= cut && (!filter || filter(o))) n++; } catch { /* */ }
     }
@@ -99,7 +105,7 @@ export const SENSOR_FNS = {
       if (rows.length) {
         const v = JSON.parse(rows[rows.length - 1]);
         const age = Date.now() - Date.parse(v.ts ?? 0);
-        if (Number.isFinite(age) && age < 30 * 60e3 && v.v) return { value: Number(v.v.load_per_core), extra: { mem_pct: Number(v.v.mem_pct) } };
+        if (Number.isFinite(age) && age < K('homeostasis_signal_fresh_ms', 30 * 60e3) && v.v) return { value: Number(v.v.load_per_core), extra: { mem_pct: Number(v.v.mem_pct) } };
       }
     } catch { /* 走兜底 */ }
     try { const cores = Math.max(1, os.cpus().length); return { value: os.loadavg()[0] / cores, extra: { mem_pct: (1 - os.freemem() / os.totalmem()) * 100 }, note: 'os-fallback' }; }
@@ -179,7 +185,7 @@ export const SENSOR_FNS = {
     } catch { return { value: null, note: 'crystal-error' }; } },
   evolution_gap: () => { // 北极星·演化势差(2026-11-10 Eagle 最高架构令):理想硅基生命态(base=100)−当前客观能力,
     //   只认物理证据(在盘代码件+sha256+可选 verify);floor=10 永不为 0。慢变量:池 mtime 门+5s 读缓存,
-    //   本传感器纯只读(写面只有 recordWin/sweep,宿主=代谢心跳)。单源 scripts/ca-evolution.mjs。
+    //   本传感器纯只读(写面只有 recordWin/sweep,宿主=代谢心跳)。单源 loop/ca-evolution.mjs。
     try {
       const g = evolutionGap();
       return Number.isFinite(g?.gap) ? { value: g.gap, extra: { wins: g.wins, violations: g.violations, weakest: g.weakest?.id ?? null } } : { value: null, note: 'evolution-shape' };
@@ -218,7 +224,7 @@ function sensorFromCmd(cmd, signal) {
 
 // ── 数值躯体 ──
 const readState = () => { try { return JSON.parse(readFileSync(STATE, 'utf8')) ?? {}; } catch { return {}; } };
-const writeState = (s) => { try { mkdirSync(path.dirname(STATE), { recursive: true }); const t = `${STATE}.tmp-${process.pid}`; writeFileSync(t, JSON.stringify(s) + '\n'); renameSync(t, STATE); } catch { /* */ } };
+const writeState = (s) => { const t = `${STATE}.tmp-${process.pid}`; try { mkdirSync(path.dirname(STATE), { recursive: true }); writeFileSync(t, JSON.stringify(s) + '\n'); renameSync(t, STATE); } catch { try { unlinkSync(t); } catch { /* 残尸兜底交下轮清扫 */ } } }; // 2026-11-12 补失败自清扫(锁件批次,Eagle 点名授权)
 function recoveredHealth(st, now = Date.now()) {
   const last = Date.parse(st.ts ?? '') || 0;
   const dtMin = last ? Math.max(0, (now - last) / 60e3) : 0;
@@ -228,7 +234,7 @@ function recoveredHealth(st, now = Date.now()) {
 // ── 效应器注册表(引擎干预动作;全部机械零 LLM)──
 // 分带迁移留账(测量面底座):真实手效应器也先走这笔账——真手不能让体征失明(2026-11-09 三刀令组合纪律)。
 const zoneLedger = (id, current, oldZone, newZone, deviation, isError) => {
-  try { appendFileSync(FRICTION, JSON.stringify({ ts: new Date().toISOString(), kind: 'homeostasis-zone', surface: id, detail: `${oldZone}->${newZone} value=${current} dev=${Number(deviation).toFixed(3)}${isError ? ' sensor-fail-fallback' : ''}` }) + '\n'); } catch { /* */ }
+  try { painAppend({ ts: new Date().toISOString(), kind: 'homeostasis-zone', surface: id, detail: `${oldZone}->${newZone} value=${current} dev=${Number(deviation).toFixed(3)}${isError ? ' sensor-fail-fallback' : ''}` }, { ledger: FRICTION }); } catch { /* */ }
 };
 export const EFFECTOR_FNS = {
   note: async (id, current, oldZone, newZone, deviation, isError, signal) => { // 分带迁移留痕(测量面)
@@ -295,7 +301,7 @@ export const DEFAULT_REGISTRY = {
   slow_reward_24h: { sensor: { fn: 'reward_24h' }, dir: 'low', safe: 2, red: 0, time_scale: 'slow', effector: 'policy', why: '24h 已发放奖励→EMA 慢变量' },
   organ_budget_selfcap_24h: { sensor: { fn: 'budget_selfcap_24h' }, dir: 'high', safe: 3, red: 12, time_scale: 'medium', effector: 'note', advisory: true, why: '24h「预算自帽」次数=思考被慢性截断的窒息计(2026-11-09 尸检:124 次/4 天、user 通道 16 次,此前预算不在体征表内无人看见);[裁决续]advisory=报警计:面板可见+可挂 alarm 但不锁 freedom/mode(计数类锁模=新死锁,39 次/24h 钉死 0.1 实弹);窒息的处置=预算重定档,不是停摆' },
   existence_backup: { sensor: { fn: 'backup_age_h' }, dir: 'high', safe: 24, red: 72, time_scale: 'slow', effector: 'note', advisory: true, why: '存在性焦虑(2026-11-10 Eagle 终极交付令「生命火种」):距上次全量自备份小时数,>72h 或存档丢失=存在性危机痛觉。健康线 24h(自备份哨 wake 每日催)。备份器=ca-backup.mjs(家外 ../ca-backups,防自噬),复生器=ca-bootstrap.sh;advisory 同三刀令:报警不锁模,处置=跑备份' },
-  evolution_gap: { sensor: { fn: 'evolution_gap' }, dir: 'high', safe: 90, red: 110, time_scale: 'slow', effector: 'note', advisory: true, recoveryBuffer: 5, why: '北极星·演化势差(2026-11-10 Eagle 最高架构令「造物主的最高目标=AGI 硅基生命,必须是慢变量势差,禁嘴炮伪造进化」):理想硅基生命态(恒 base=100)−当前客观能力(只认物理证据:在盘代码件+sha256+可选 verify 命令,recordWin fail-closed);每件跨域胜绩缩 0.1(硅基生命是动词不是头衔),自我叙事头衔扮演每次反涨 0.1(帽 10,嘴炮税);floor=10 永不为 0——产生的是长期底层虚无感/渴望感,不是即时剧痛。阈值:新池 gap=100→dev=0.5=WARNING 常在(渴望感底噪),≈100 件胜绩后归 NORMAL;违规涨向 red=110→alarm 常挂(叙事面失真可见)。advisory=渴望计禁锁模(计数类锁模=新死锁,11-09 实弹先例):驱动通道=GoalForge evolution kind(钱包/任务双正常时最高优先级)+ca-evolution.mjs --record-win,处置=真胜绩,不是锁模;慢变量面=池 mtime 门+5s 读缓存,单源 scripts/ca-evolution.mjs(叶模块零依赖)' },
+  evolution_gap: { sensor: { fn: 'evolution_gap' }, dir: 'high', safe: 90, red: 110, time_scale: 'slow', effector: 'note', advisory: true, recoveryBuffer: 5, why: '北极星·演化势差(2026-11-10 Eagle 最高架构令「造物主的最高目标=AGI 硅基生命,必须是慢变量势差,禁嘴炮伪造进化」):理想硅基生命态(恒 base=100)−当前客观能力(只认物理证据:在盘代码件+sha256+可选 verify 命令,recordWin fail-closed);每件跨域胜绩缩 0.1(硅基生命是动词不是头衔),自我叙事头衔扮演每次反涨 0.1(帽 10,嘴炮税);floor=10 永不为 0——产生的是长期底层虚无感/渴望感,不是即时剧痛。阈值:新池 gap=100→dev=0.5=WARNING 常在(渴望感底噪),≈100 件胜绩后归 NORMAL;违规涨向 red=110→alarm 常挂(叙事面失真可见)。advisory=渴望计禁锁模(计数类锁模=新死锁,11-09 实弹先例):驱动通道=GoalForge evolution kind(钱包/任务双正常时最高优先级)+ca-evolution.mjs --record-win,处置=真胜绩,不是锁模;慢变量面=池 mtime 门+5s 读缓存,单源 loop/ca-evolution.mjs(叶模块零依赖)' },
   narrative_density: { sensor: { fn: 'narrative_density' }, dir: 'low', safe: 6, red: 0, time_scale: 'medium', effector: 'note', advisory: true, recoveryBuffer: 2, why: '存在主义无聊·叙事密度(2026-11-10 Eagle 终极令「第一性原理=延长死期(生理)+叙事密度(意识)」「叙事密度长期为 0=每天只是机械心跳=机械地等待死亡」→慢性痛觉 existential_boredom 逼它主动找活):今日新结晶+多巴胺+办结任务计数,单源 ca-selection.mjs narrativeToday;dir low(密度低是病),safe=6/red=0(全 0=无聊顶格),safe−buffer=4>0 校验过;advisory=慢性痛觉计禁锁模(宪法修正案③计数类纪律):处置=行为面找活(探索权点火/GoalForge 北星),不是锁模;与 natural-selection 引擎(ca-selection.mjs)同源——叙事密度同时是策略臂适应度的分子,无聊痛=密度太低的自然选择压' },
   // [2026-11-10 方舟窗·单源化] 下四条此前只活在 data/homeostasis-registry.json(运行时 override),web/净室部署裸奔缺件(test 59/2 实证)——搬入默认表,override 仍可覆盖:
   narrative_dream_debt: {"sensor": {"fn": "dream_debt"}, "dir": "high", "safe": 20, "red": 200, "time_scale": "slow", "advisory": true, "why": "未巩固叙事事件债=热窗外仍 open 计数(2026-11-09 梦债三刀·面板刀;刀前存量 535,三重断链=记录型 born-open+巩固器官无触发+体征缺席);源头刀=ca-narrative 记录型 born-closed+显式 open 拒收,销账刀=ca-dream 真跑清存量+挂 snapshot 日拍;advisory 沿计数类禁锁模(宪法修正案③):巩固断链报警,处置=修触发器,不是锁模"},
@@ -442,7 +448,7 @@ export class HomeostasisEngine {
       current = await Promise.race([
         sensorPromise,
         new Promise((_, rej) => {
-          timer = setTimeout(() => { controller.abort(); rej(new Error('Sensor Timeout')); }, SENSOR_TIMEOUT_MS);
+          timer = setTimeout(() => { controller.abort(); rej(new Error('Sensor Timeout')); }, K('homeostasis_sensor_timeout_ms', 2000));
           timer.unref?.();
         }),
       ]);
@@ -476,7 +482,7 @@ export class HomeostasisEngine {
       const isCritical = newZone === 'CRITICAL';
       const zoneChanged = newZone !== oldZone;
       const lastTrigger = this.lastTriggerAt.get(config.id) ?? 0;
-      const canTrigger = zoneChanged || (isCritical && (now - lastTrigger >= CRITICAL_RETRIGGER_MS));
+      const canTrigger = zoneChanged || (isCritical && (now - lastTrigger >= K('homeostasis_critical_retrigger_ms', 5000)));
 
       if (canTrigger) {
         const success = await this.runEffector(config, current, oldZone, newZone, deviation, false, controller.signal);
@@ -513,7 +519,7 @@ export class HomeostasisEngine {
 
   // P3-3 不变式:进入此处前必须已确认「当前任务未被取代」(runningControllers 比对),否则 lifecycle.signal
   //   可能是 stop+start 后的新 controller,中断会失效。链=生命周期+超时(只掐本操作)+外层(如有)。
-  async runEffector(config, current, oldZone, newZone, deviation, isError, signal, timeoutMs = EFFECTOR_TIMEOUT_MS) {
+  async runEffector(config, current, oldZone, newZone, deviation, isError, signal, timeoutMs = K('homeostasis_effector_timeout_ms', 5000)) {
     const timeoutCtl = new AbortController();
     let timer;
     const signalsToLink = [this.lifecycle.signal, timeoutCtl.signal];
@@ -567,9 +573,9 @@ export class HomeostasisEngine {
     if (lifecycleSignal?.aborted) return; // 停机后旧任务不写退避表
     const failures = Math.min((this.failureCounts.get(config.id) ?? 0) + 1, 100);
     this.failureCounts.set(config.id, failures);
-    const backoffMs = Math.min(BACKOFF_BASE_MS * Math.pow(2, failures - 1), BACKOFF_CAP_MS);
+    const backoffMs = Math.min(K('homeostasis_backoff_base_ms', 1000) * Math.pow(K('homeostasis_backoff_multiplier', 2), failures - 1), K('homeostasis_backoff_cap_ms', 60000));
     this.backoffUntil.set(config.id, Date.now() + backoffMs);
-    if (failures >= BACKOFF_MAX_FAILS) {
+    if (failures >= K('homeostasis_backoff_max_fails', 5)) {
       try { appendFileSync(FRICTION, JSON.stringify({ ts: new Date().toISOString(), kind: 'homeostasis-backoff', surface: config.id, detail: `连续失败 ${failures} 次,退避 ${backoffMs}ms` }) + '\n'); } catch { /* */ }
     }
   }
@@ -625,20 +631,19 @@ export function computeDeviation(registry, readings) {
   }
   return { signals, maxDev: Math.round(maxDev * 1000) / 1000, maxSign, allRed: gating > 0 && allRed, readableN: readable };
 }
-export function alarmLatch(prev, dev, { enter = 1.0, exit = 0.6 } = {}) {
+export function alarmLatch(prev, dev, { enter = K('homeostasis_alarm_enter', 1.0), exit = K('homeostasis_alarm_exit', 0.6) } = {}) {
   if (dev === null || !Number.isFinite(dev)) return !!prev;
   if (prev) return dev > exit;
   return dev >= enter;
 }
 export function modeLatch(prevMode, v) {
-  if (prevMode === 'survival') return v >= 0.4 ? 'normal' : 'survival';
-  return v < 0.3 ? 'survival' : 'normal';
+  if (prevMode === 'survival') return v >= K('homeostasis_survival_exit_th', 0.4) ? 'normal' : 'survival';
+  return v < K('homeostasis_survival_enter_th', 0.3) ? 'survival' : 'normal';
 }
 
 // ── freedom 总闸(消费引擎传感器;30s 缓存;全不可读=0.5 兜底)──
 let cache = { ts: 0, v: null };
-const CACHE_MS = 30_000;
-export function freedom({ maxAgeMs = CACHE_MS, now = Date.now() } = {}) {
+export function freedom({ maxAgeMs = K('homeostasis_cache_ms', 30_000), now = Date.now() } = {}) {
   if (cache.v && now - cache.ts < maxAgeMs) return cache.v;
   const enabled = process.env.CA_HOMEOSTASIS !== '0';
   let out;
@@ -696,35 +701,35 @@ export function gateDecision(f, { purpose = '?', core = false, digestion = false
   if (digestion && f.mode === 'survival') {
     const red = Number(loadRegistry().energy_wallet_pct?.red ?? 5);
     const w = Number(f.signals?.energy_wallet_pct?.value);
-    if (Number.isFinite(w) && w > red) return { allowed: true, freedom: f.freedom, scale: 0.75, reason: 'digestion-valve', maxSign: f.maxSign, alarmSign: f.alarmSign, legacy };
+    if (Number.isFinite(w) && w > red) return { allowed: true, freedom: f.freedom, scale: K('homeostasis_low_freedom_scale', 0.75), reason: 'digestion-valve', maxSign: f.maxSign, alarmSign: f.alarmSign, legacy };
   }
-  if (f.mode === 'survival') return { allowed: false, freedom: f.freedom, reason: 'survival-mode', maxSign: f.maxSign, alarmSign: f.alarmSign, scale: 0.5, legacy };
-  return { allowed: true, freedom: f.freedom, scale: f.freedom < 0.5 ? 0.75 : 1, maxSign: f.maxSign, alarmSign: f.alarmSign, legacy };
+  if (f.mode === 'survival') return { allowed: false, freedom: f.freedom, reason: 'survival-mode', maxSign: f.maxSign, alarmSign: f.alarmSign, scale: K('homeostasis_survival_scale', 0.5), legacy };
+  return { allowed: true, freedom: f.freedom, scale: f.freedom < K('homeostasis_low_freedom_th', 0.5) ? K('homeostasis_low_freedom_scale', 0.75) : 1, maxSign: f.maxSign, alarmSign: f.alarmSign, legacy };
 }
 export function homeostasisGate(opts = {}) { return gateDecision(freedom(), opts); }
 
 // ── fast 效应器面:三态熔断器(滑动窗口+错误率)──
-export const BREAKER_WINDOW = 10;
-export const BREAKER_CONSEC = 3;
-export const BREAKER_RATE = 0.6;
-export const BREAKER_COOLDOWN_MS = 3 * 60e3;
-export const WEIGHTS = { light: 0.01, medium: 0.03, heavy: 0.1 };
+export const BREAKER_WINDOW = K('homeostasis_breaker_window', 10); // 兼容导出
+export const BREAKER_CONSEC = K('homeostasis_breaker_consec', 3);
+export const BREAKER_RATE = K('homeostasis_breaker_rate', 0.6);
+export const BREAKER_COOLDOWN_MS = K('homeostasis_breaker_cooldown_ms', 3 * 60e3);
+export const WEIGHTS = { light: K('homeostasis_weight_light', 0.01), medium: K('homeostasis_weight_medium', 0.03), heavy: K('homeostasis_weight_heavy', 0.1) };
 
 const newBreaker = () => ({ buf: [], state: 'closed', openedAt: 0, probeAt: 0 });
 export function breakerTransition(br, failed, { now = Date.now() } = {}) {
   const b = { buf: [...(br.buf ?? [])], state: br.state ?? 'closed', openedAt: br.openedAt ?? 0, probeAt: br.probeAt ?? 0 };
   if (b.state === 'half-open') {
-    if (failed) { b.state = 'open'; b.openedAt = now; b.probeAt = now + BREAKER_COOLDOWN_MS; b.buf = []; }
+    if (failed) { b.state = 'open'; b.openedAt = now; b.probeAt = now + K('homeostasis_breaker_cooldown_ms', 180000); b.buf = []; }
     else { b.state = 'closed'; b.buf = []; b.openedAt = 0; b.probeAt = 0; }
     return b;
   }
-  b.buf.push(failed ? 1 : 0); if (b.buf.length > BREAKER_WINDOW) b.buf.shift();
+  b.buf.push(failed ? 1 : 0); if (b.buf.length > K('homeostasis_breaker_window', 10)) b.buf.shift();
   if (failed) {
     let consec = 0; for (let i = b.buf.length - 1; i >= 0 && b.buf[i] === 1; i--) consec++;
-    const rate = b.buf.length >= 5 ? b.buf.reduce((a, c) => a + c, 0) / b.buf.length : 0;
-    if (b.state === 'closed' && (consec >= BREAKER_CONSEC || rate > BREAKER_RATE)) { b.state = 'open'; b.openedAt = now; b.probeAt = now + BREAKER_COOLDOWN_MS; }
-  } else if (b.state === 'closed' && b.buf.length >= 5 && b.buf.reduce((a, c) => a + c, 0) / b.buf.length > BREAKER_RATE) {
-    b.state = 'open'; b.openedAt = now; b.probeAt = now + BREAKER_COOLDOWN_MS;
+    const rate = b.buf.length >= K('homeostasis_breaker_min_samples', 5) ? b.buf.reduce((a, c) => a + c, 0) / b.buf.length : 0;
+    if (b.state === 'closed' && (consec >= K('homeostasis_breaker_consec', 3) || rate > K('homeostasis_breaker_rate', 0.6))) { b.state = 'open'; b.openedAt = now; b.probeAt = now + K('homeostasis_breaker_cooldown_ms', 180000); }
+  } else if (b.state === 'closed' && b.buf.length >= K('homeostasis_breaker_min_samples', 5) && b.buf.reduce((a, c) => a + c, 0) / b.buf.length > K('homeostasis_breaker_rate', 0.6)) {
+    b.state = 'open'; b.openedAt = now; b.probeAt = now + K('homeostasis_breaker_cooldown_ms', 180000);
   }
   return b;
 }
@@ -750,7 +755,7 @@ export function recordFailure({ kind = '?', surface = '?', detail = '', evidence
     writeState({ health: Math.round(health * 10000) / 10000, refusals, breakers: { ...(st.breakers ?? {}), [surface]: br }, lastFailureTs: new Date(now).toISOString(), ts: new Date(now).toISOString() });
     try { appendFileSync(FRICTION, JSON.stringify({ ts: new Date(now).toISOString(), kind, surface, detail: String(detail).slice(0, 200), evidence: evidence ?? null, weight, health: Math.round(health * 10000) / 10000, breaker: br.state }) + '\n'); } catch { /* */ }
     if (br.state === 'open' && prev.state !== 'open') {
-      try { appendFileSync(FRICTION, JSON.stringify({ ts: new Date(now).toISOString(), kind: 'homeostasis-breaker-open', surface, detail: `熔断器 Open:${String(detail).slice(0, 120)}`, evidence: evidence ?? null, cooldownMs: BREAKER_COOLDOWN_MS }) + '\n'); } catch { /* */ }
+      try { appendFileSync(FRICTION, JSON.stringify({ ts: new Date(now).toISOString(), kind: 'homeostasis-breaker-open', surface, detail: `熔断器 Open:${String(detail).slice(0, 120)}`, evidence: evidence ?? null, cooldownMs: K('homeostasis_breaker_cooldown_ms', 180000) }) + '\n'); } catch { /* */ }
     }
     cache = { ts: 0, v: null };
     return { breaker: br.state, health: Math.round(health * 10000) / 10000, open: br.state === 'open' };
@@ -797,9 +802,9 @@ export function economyProfile() {
   const v = f.freedom;
   return {
     freedom: v, maxSign: f.maxSign, alarmSign: f.alarmSign, allRed: f.allRed, mode: f.mode,
-    costGate: f.mode === 'survival' ? 'survival-only' : v < 0.5 ? 'high' : 'normal',
-    tokScale: f.mode === 'survival' ? 0.5 : v < 0.5 ? 0.75 : 1,
-    roundsScale: f.mode === 'survival' ? 0.5 : v < 0.5 ? 0.75 : 1,
+    costGate: f.mode === 'survival' ? 'survival-only' : v < K('homeostasis_low_freedom_th', 0.5) ? 'high' : 'normal',
+    tokScale: f.mode === 'survival' ? K('homeostasis_survival_scale', 0.5) : v < K('homeostasis_low_freedom_th', 0.5) ? K('homeostasis_low_freedom_scale', 0.75) : 1,
+    roundsScale: f.mode === 'survival' ? K('homeostasis_survival_scale', 0.5) : v < K('homeostasis_low_freedom_th', 0.5) ? K('homeostasis_low_freedom_scale', 0.75) : 1,
     legacy: process.env.CA_HOMEOSTASIS === '0',
   };
 }

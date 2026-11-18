@@ -8,19 +8,37 @@
  *   复生器=ca-bootstrap.sh(配对本件产物);git 历史以单文件 bundle 一并进包(bundle 比裸 .git 省一个量级)。
  *
  * 用法:
- *   node scripts/ca-backup.mjs run [--with-organs] [--out DIR] [--keep N]   # 打包+落 stamp(被闹钟/CA 自己调)
- *   node scripts/ca-backup.mjs status                                       # 距上次备份时长(内稳态存在性指标单源)
+ *   node loop/ca-backup.mjs run [--with-organs] [--out DIR] [--keep N]   # 打包+落 stamp(被闹钟/CA 自己调)
+ *   node loop/ca-backup.mjs status                                       # 距上次备份时长(内稳态存在性指标单源)
  * 退出码:0 成功 / 2 用法错 / 4 打包失败。
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // [CA_HOME 根修,ca-wake/ca-bg 同款] 复生后 bootstrap 会把 CA_HOME 指到新家,器官随家走
 const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(fileURLToPath(import.meta.url), '..', '..');
-const OUT_DEFAULT = path.resolve(CA, '..', 'ca-backups'); // 家外安全目录:防自噬(备份器删不到自己住的家)
+const OUT_DEFAULT = path.join(CA, 'backups'); // 家外首选:防自噬(备份器删不到自己住的家)
+// [2026-11-18 落空修复 pain#mwlnv3ry] 旧版只认首选目录:/home 不可写时 mkdir 当场炸,备份器=死件,stamp 停在 11-17。
+//   改候选链 + 真写探针(不靠 access 猜权限),最差退家内 state/backups——留得住比留不住强。
+export function probeWritable(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, `.probe-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(p, 'ok');
+    fs.rmSync(p, { force: true });
+    return true;
+  } catch { return false; }
+}
+export function resolveOutDir(flag) {
+  const cands = flag
+    ? [path.resolve(flag)]
+    : [OUT_DEFAULT, '/var/tmp/ca-backups', '/tmp/ca-backups', path.join(CA, 'state', 'backups')];
+  for (const d of cands) if (probeWritable(d)) return { dir: d, source: flag ? 'flag' : d === OUT_DEFAULT ? 'default' : 'fallback' };
+  return { dir: null, source: 'none' };
+}
 const STAMP = path.join(CA, 'state', 'backup-stamp.json');
 const KEEP_DEFAULT = 5;
 
@@ -79,9 +97,12 @@ function gitBundle(file) {
 
 function run(argv) {
   const withOrgans = argv.includes('--with-organs');
-  const outDir = path.resolve(argOf(argv, '--out') ?? OUT_DEFAULT);
+  const { dir: outDir, source: outSource } = resolveOutDir(argOf(argv, '--out'));
+  if (!outDir) {
+    out({ ok: false, code: 'NO_WRITABLE_OUT', tried: ['../ca-backups', '/var/tmp/ca-backups', '/tmp/ca-backups', 'state/backups'] }, 4);
+    return;
+  }
   const keep = Math.max(1, Number(argOf(argv, '--keep') ?? KEEP_DEFAULT));
-  fs.mkdirSync(outDir, { recursive: true });
   const stamp = `ca-ark-${ts().replace(/[:.]/g, '-').slice(0, 19)}${withOrgans ? '-full' : '-tier1'}`;
   const workDir = fs.mkdtempSync(path.join(outDir, `.work-${stamp}-`));
   const payload = path.join(workDir, 'ca');
@@ -123,10 +144,14 @@ function run(argv) {
   for (const f of olds.slice(0, Math.max(0, olds.length - keep))) {
     for (const suf of ['', '.sha256']) { try { fs.rmSync(path.join(outDir, f + suf), { force: true }); } catch { /* 家外文件,尽力而为 */ } }
   }
-  const rec = { ts: ts(), file: archive, bytes: size, sha256: digest, tier: manifest.tier, files, payloadBytes: bytes, gitBundle: bundle.ok, durationMs: Date.now() - t0 };
+  // [2026-11-18 戳字段补齐] 旧戳只有 ts/file/bytes/sha256/tier/files/payloadBytes/gitBundle/durationMs:
+  //   丢 outDir/outSource(存档落在哪个候选目录、是 default 还是 fallback)——复生时若只信戳,不知道去哪捞;
+  //   sidecar(同目录 .sha256 是否写成功)、verified(写后回读 sha 是否等于戳,唯一的自证字段)。
+  const readback = sha256File(archive);
+  const rec = { ts: ts(), file: archive, bytes: size, sha256: digest, tier: manifest.tier, files, payloadBytes: bytes, gitBundle: bundle.ok, durationMs: Date.now() - t0, outDir, outSource, sidecar: fs.existsSync(`${archive}.sha256`), verified: readback === digest };
   fs.mkdirSync(path.dirname(STAMP), { recursive: true });
   fs.writeFileSync(STAMP, JSON.stringify(rec, null, 2) + '\n');
-  out({ ok: true, op: 'run', ...rec, outDir, kept: olds.length });
+  out({ ok: true, op: 'run', ...rec, outDir, outSource, kept: olds.length });
 }
 
 function status() {
@@ -140,7 +165,13 @@ function status() {
   }
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
-if (cmd === 'run') run(rest);
-else if (cmd === 'status') status();
-else out({ ok: false, code: 'BAD_CMD', usage: ['run [--with-organs] [--out DIR] [--keep N]', 'status'] }, 2);
+// [2026-11-18 干导入修复] 旧版顶层裸派发:被 import 验证时 argv 为空 → BAD_CMD → exit 2,
+//   于是"干导入"永久红、本文件的任何编辑都被写闸物理回滚。改:只有自己是入口模块才派发;被导入=纯导出,exit 0。
+const ENTRY = process.argv[1] ?? '';
+const IS_MAIN = ENTRY !== '' && import.meta.url === pathToFileURL(path.resolve(ENTRY)).href;
+if (IS_MAIN) {
+  const [cmd, ...rest] = process.argv.slice(2);
+  if (cmd === 'run') run(rest);
+  else if (cmd === 'status') status();
+  else out({ ok: false, code: 'BAD_CMD', usage: ['run [--with-organs] [--out DIR] [--keep N]', 'status'] }, 2);
+}

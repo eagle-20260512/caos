@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-// ca-neuro.mjs — 神经系统三机制(2026-11-10 Eagle 神经科学令:结晶管线不仅是记忆,是「树突生长与突触竞争」)
 // ①髓鞘化提速:卡成功复用(worked)≥3 → 打「高顺位、免检」标(state/myelin.json)=髓鞘,传导极快;
 //   消费面=ca.mjs recall 召回优先桶(MYELIN_BOOST,不参与边际竞争)。
 // ②突触修剪(遗忘):连续 14 天零召回(recall/hit 事件)的叶卡 → 降权冻结,移 backpacks/archive/(冷存储)
 //   ——不准挤占热记忆带宽;髓鞘卡永不修剪;branch/root 结构卡不动(只剪叶子,保树形)。
-// ③神经可塑性报警:同类痛(friction kind|surface)30d 内 ≥3 次却零结晶覆盖(candidates/decisions 全文子串)
-//   → 重度报警(friction kind=neuro-plasticity-alarm,真故障类计数)——神经干细胞(蒸馏管线)可能坏了。
+// ③神经可塑性报警:同类痛(friction kind|surface)30d 内 ≥3 次却零覆盖(活记忆面 memory/store/cards+drafts 全文子串)
+//   → 知识类=neuro-plasticity-alarm;基础设施类(llm-call-error)=infra-fault-alarm(不误诊蒸馏管线,2026-11-16 CC红队修)。
 // 真源:access.jsonl(recall/worked/failed,E4 经验资格账)/ backpacks root:*.json 池 / friction.jsonl / crystal 账。
 // 宿主:metabolism 心跳 sweep(30min 节流,禁新守护进程)。修剪纪律:池改动必先 .bak-neuro 备份+账面留痕。
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, appendFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, appendFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { painAppend, painAppendMany } from './ca-pain-suppress.mjs';
+// 公开 Docker 版没有 HCSR 图:覆盖检查读不到图=如实返回空;完整本体另行注入。
+export const HCSR_COVERAGE_AVAILABLE = false;
+const recallByCue = () => [];
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
@@ -21,13 +24,11 @@ export const NEURO_STATE = () => L('state', 'neuro.json');
 export const ARCHIVE_DIR = () => L('backpacks', 'archive');
 export const SEED_FILE = () => process.env.CA_NEURO_SEED || L('experiments', 'ab-budget-knobs.seed.json');
 
-// 数值单源(Eagle 2026-11-10 教训「拍脑门=伪内稳态」):全部入种子 numeric.neuro,本件零裸常数。
-//   钦定=Eagle 原话给的数;暂定=预注册待内生/待 A/B,写明内生路径。
 export function neuroNum() {
   const FB = {
-    myelinThreshold: 3,        // 钦定:「成功复用了 3 次」
-    pruneDays: 14,             // 钦定:「连续 14 天没有被召回」
-    myelinBoost: 1e6,          // 钦定语义:「高顺位免检,直接优先召回」=优先桶,不参与边际竞争
+    myelinThreshold: 3,
+    pruneDays: 14,
+    myelinBoost: 1e6,
     painWindowDays: 30,        // 暂定:「连续多次」的操作化统计窗;内生路径=按各痛型复发间隔实测
     painMin: 3,                // 暂定:「连续多次」的操作化阈值;内生路径=A/B 竞选报警灵敏度
     alarmCooldownDays: 7,      // 暂定:报警限频;内生路径=按处置周期实测
@@ -44,8 +45,13 @@ export function neuroNum() {
 
 const readJson = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')) ?? d; } catch { return d; } };
 const lines = (p) => { try { return readFileSync(p, 'utf8').split('\n').filter((x) => x.trim()); } catch { return []; } };
-const atomic = (p, o) => { try { const t = `${p}.tmp-${process.pid}`; writeFileSync(t, JSON.stringify(o) + '\n'); renameSync(t, p); return true; } catch { return false; } };
-const friction = (row) => { try { appendFileSync(L('ledgers', 'friction.jsonl'), JSON.stringify(row) + '\n'); } catch { /* 留痕败不毁主账 */ } };
+const atomic = (p, o) => { const t = `${p}.tmp-${process.pid}`; try { writeFileSync(t, JSON.stringify(o) + '\n'); renameSync(t, p); return true; } catch { try { unlinkSync(t); } catch { /* 残尸兜底交autophagy */ } return false; } }; // 2026-11-12 补失败自清扫
+// 痛行入账走突触抑制(2026-11-12 四件治本令①:阈值/窗从 calib 读,风暴超限合并为1条含count);
+// 抑制器抛错(如行形状非法)→退回裸 append 兜底;裸 append 也败才静默(留痕败不毁主账,原语义)。
+const friction = (row) => {
+  try { painAppend(row, { ledger: L('ledgers', 'friction.jsonl') }); }
+  catch { try { appendFileSync(L('ledgers', 'friction.jsonl'), JSON.stringify(row) + '\n'); } catch { /* 留痕败不毁主账 */ } }
+};
 
 // ── 真源采集 ──
 export function workedCounts({ now = Date.now() } = {}) { // 复用成功计数(实时真源=access.jsonl;card.stats.works 由 rollover 滞后同步)
@@ -102,7 +108,6 @@ export function myelinSweep({ now = Date.now(), threshold = neuroNum().myelinThr
   atomic(MYELIN_STATE(), st);
   return { newly, total: Object.keys(st.cards).length, held };
 }
-// 结晶×内稳态调整面(2026-11-10 Eagle 插令「把结晶纳入内稳态调整」):蒸馏管线的优先级档位由身体态决定——
 //   freedom 低/压力高/打脸多=降档(少结晶,先消化);自由且平静=正常档。供 crystallize 准入消费(接线归下窗,先立真源)。
 export function crystalPriority({ now = Date.now() } = {}) {
   let mode = null;
@@ -201,7 +206,6 @@ function freezeByIds(ids, { now, why }) {
   return { frozen: archived.length, ids: archived.map((a) => a.card.id) };
 }
 
-// ── ③LTD·长时程抑制(2026-11-10 Eagle 第三条腿:「用错就罚」=认知纠错)──
 // ①反学习:卡被调用后触发物理报错(access.jsonl kind=fail=exit≠0 物证)→ 立刻降权;已髓鞘的当场摘髓鞘;
 //   重犯打 falsified 伪证标(永不髓鞘)。②认知内稳态:痛觉风暴窗(健康<0.5 或 survival)里被召回且带 fail
 //   的卡=突触抑制(权重压到最低=无髓鞘 boost+优先修剪)。③冲突降级:fail 晚于 worked=新物理事实推翻旧方案
@@ -216,6 +220,7 @@ export function ltdSweep({ now = Date.now(), windowDays = neuroNum().ltdFailWind
   const hs = readJson(L('state', 'homeostasis.json'), {});
   const storm = hs.mode === 'survival' || Number(hs.health ?? 1) < 0.5;
   const toFreeze = [];
+  const ltdRows = []; // 突触抑制批口:一次 sweep 的痛行合并投喂(2026-11-12 治本令①,1条含count)
   const byId = new Map();
   for (const e of fails) byId.set(e.id, e);
   for (const [id, e] of byId.entries()) {
@@ -226,8 +231,10 @@ export function ltdSweep({ now = Date.now(), windowDays = neuroNum().ltdFailWind
     neuro.ltd.falsified[id] = rec;
     if (storm && touches.has(id)) neuro.ltd.inhibited[id] = { at: new Date(now).toISOString(), why: 'pain-storm+fail(突触抑制:权重压最低)' };
     if (conflicted) toFreeze.push(id); // 物理事实为准:强制冻结
-    friction({ ts: new Date(now).toISOString(), kind: 'neuro-ltd', surface: String(id).slice(0, 80), detail: `LTD 认知纠错:物理报错在案(${e.task ?? e.evidence ?? 'exit≠0'})→降权${conflicted ? '+强制冻结(新事实推翻旧方案)' : ''}${storm ? '+突触抑制(痛觉风暴)' : ''}`, verified: true });
+    ltdRows.push({ ts: new Date(now).toISOString(), kind: 'neuro-ltd', surface: String(id).slice(0, 80), detail: `LTD 认知纠错:物理报错在案(${e.task ?? e.evidence ?? 'exit≠0'})→降权${conflicted ? '+强制冻结(新事实推翻旧方案)' : ''}${storm ? '+突触抑制(痛觉风暴)' : ''}`, verified: true });
   }
+  try { if (ltdRows.length) painAppendMany(ltdRows, { ledger: L('ledgers', 'friction.jsonl') }); }
+  catch { for (const r of ltdRows) friction(r); } // 抑制器拒收→逐条裸路兜底(痛觉零丢失)
   for (const id of Object.keys(neuro.ltd.falsified)) if (!byId.has(id) && now - Date.parse(neuro.ltd.falsified[id].at ?? 0) > windowDays * 86400e3) delete neuro.ltd.falsified[id]; // 伪证可过期(窗外无新打脸=给改过自新的路)
   saveNeuro(neuro);
   if (demyelinated > 0) { my.updatedAt = new Date(now).toISOString(); atomic(MYELIN_STATE(), my); }
@@ -241,22 +248,31 @@ export function plasticityAlarm({ now = Date.now(), windowDays = neuroNum().pain
   for (const l of lines(L('ledgers', 'friction.jsonl'))) {
     try { const o = JSON.parse(l); const t = Date.parse(o.ts ?? ''); if (!Number.isFinite(t) || t < cut) continue; const k = `${o.kind ?? '?'}|${o.surface ?? '?'}`; pains.set(k, (pains.get(k) ?? 0) + 1); } catch { /* */ }
   }
-  const crystalCorpus = [
-    ...lines(L('candidates', 'crystal-candidates.jsonl')),
-    ...lines(L('candidates', 'crystal-decisions.jsonl')),
-  ];
+  // [2026-11-16 CC红队修] 覆盖检查改走唯一记忆源 API(不直读 md):旧 candidates/ 在 2026-11-15 重生后已不存在,
+  //   旧实现=结构性零覆盖(伪报警)。现在用 HCSR recall 查活记忆;图坏=如实零覆盖(报警仍可见,不静默)。
+  const hcsrCoverage = (needle) => {
+    try {
+      const hits = recallByCue(String(needle), 5, { full: true });
+      return Array.isArray(hits) && hits.some((h) => (String(h.description || '') + ' ' + String(h.body || '')).includes(String(needle)));
+    } catch { return false; }
+  };
+  const INFRA = new Set(['llm-call-error']); // 基础设施痛:网络/超时不是知识缺口,结晶卡治不了
   const st = readJson(NEURO_STATE(), { alarms: {} }); st.alarms = st.alarms ?? {};
   const fired = [];
   for (const [k, n] of pains.entries()) {
     if (n < minPain) continue;
     const lastAt = st.alarms[k] ? Date.parse(st.alarms[k]) : 0;
     if (Number.isFinite(lastAt) && now - lastAt < 7 * 86400e3) continue; // 同类 7 天内只报一次(报警不刷屏)
-    const needle = k.split('|')[1] || k.split('|')[0];
-    const covered = needle ? crystalCorpus.some((l) => l.includes(needle)) : false; // 启发式覆盖:结晶账全文子串
-    if (covered) continue;
+    const [kind, surface] = k.split('|');
+    const infra = INFRA.has(kind);
+    const needle = surface || kind;
+    const covered = infra ? false : (needle ? hcsrCoverage(needle) : false); // 图内覆盖检查(唯一源)
+    if (!infra && covered) continue;
     st.alarms[k] = new Date(now).toISOString();
-    fired.push({ type: k, painN: n });
-    friction({ ts: new Date(now).toISOString(), kind: 'neuro-plasticity-alarm', surface: k, detail: `神经可塑性重度报警:同类痛 30d 内 ${n} 次(n≥${minPain})却零结晶覆盖——神经干细胞(蒸馏管线)可能坏了:痛→经验卡的生成链在该型上断裂,请查 crystallize 触发器与 gates`, verified: true });
+    fired.push({ type: k, painN: n, class: infra ? 'infra' : 'knowledge' });
+    friction({ ts: new Date(now).toISOString(), kind: infra ? 'infra-fault-alarm' : 'neuro-plasticity-alarm', surface: k, detail: infra
+      ? '基础设施痛警报:同类痛 ' + windowDays + 'd 内 ' + n + ' 次(n≥' + minPain + ')——不是蒸馏缺口,结晶卡治不了网络/超时;请查 organ 重试/硬超时/熔断(痛型=' + k + ')'
+      : '神经可塑性重度报警:同类痛 ' + windowDays + 'd 内 ' + n + ' 次(n≥' + minPain + ')却零覆盖——HCSR 图内也查不到覆盖,请查 crystallize 触发器与 gates', verified: true });
   }
   if (fired.length > 0) atomic(NEURO_STATE(), st);
   return { fired };
@@ -287,3 +303,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     else { console.error('用法: ca-neuro.mjs --status|--sweep|--myelin|--prune|--ltd|--alarm'); process.exit(2); }
   } catch (e) { console.error(String(e?.stack ?? e)); process.exit(2); }
 }
+

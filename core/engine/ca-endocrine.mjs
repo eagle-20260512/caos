@@ -8,7 +8,7 @@
 // 政策带(滞回:进出不对称,禁阈值横跳):
 //   pressureEma>80 → conserve(心跳 300s/输出帽 2000/温度 0.1);须 <50 才解除
 //   abundanceEma>80 → expand(心跳 60s/输出帽 8000/温度 0.7);须 <50 才解除;conserve 优先(保守优先原则)
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeMargin, collectOverhead, collectWrapup, readFloors } from './ca-organ-budget.mjs'; // 内生预算 margin(2026-11-10 Eagle 令「预算必须内生 不能拍脑门定」;叶模块,零环)
@@ -30,7 +30,7 @@ export const POLICY_MODES = {
 };
 
 const readJson = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')) ?? d; } catch { return d; } };
-const atomicWrite = (p, o) => { try { mkdirSync(path.dirname(p), { recursive: true }); const t = `${p}.tmp-${process.pid}`; writeFileSync(t, JSON.stringify(o) + '\n'); renameSync(t, p); return true; } catch { return false; } };
+const atomicWrite = (p, o) => { const t = `${p}.tmp-${process.pid}`; try { mkdirSync(path.dirname(p), { recursive: true }); writeFileSync(t, JSON.stringify(o) + '\n'); renameSync(t, p); return true; } catch { try { unlinkSync(t); } catch { /* 残尸兜底交autophagy */ } return false; } }; // 2026-11-12 补失败自清扫(锁件批次,Eagle 点名授权)
 
 // endocrine 自管键(2026-11-09):run()/forceConserve 重写政策面时只动这些,其余 co-owned 键原样保留
 //   (A/B 竞争的 wall_cap_ms/organ_budget_margin_ms 等,见 experiments/ab-budget-knobs.seed.json)。

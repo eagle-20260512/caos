@@ -6,6 +6,7 @@ export default function Config({ onClose }) {
   const [token, setToken] = useState(() => localStorage.getItem('caos-admin-token') ?? '');
   const [form, setForm] = useState({});
   const [msg, setMsg] = useState('');
+  const [recharge, setRecharge] = useState(10);
 
   const headers = () => ({ 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) });
   const load = async () => {
@@ -70,8 +71,13 @@ export default function Config({ onClose }) {
       <h3>钱包</h3>
       <label>日额度(元;预算政策,翻日不废)</label>
       <input type="number" min="0.1" step="0.5" value={form.allowanceCny ?? ''} onChange={(e) => setForm((f) => ({ ...f, allowanceCny: Number(e.target.value) }))} />
-      <button onClick={() => save('/api/config/allowance', { allowanceCny: form.allowanceCny }, '日额度已改 ¥' + form.allowanceCny + '(引擎下拍生效)')}>保存额度</button>
-      <p className="hint">临时加粮用对话页的充值(admin/recharge,翻日自废);此处是政策面。</p>
+      <button onClick={() => save('/api/config/allowance', { allowanceCny: form.allowanceCny }, '日额度已改 ¥' + form.allowanceCny + '(余额立即刷新)')}>保存额度</button>
+      <p className="hint">日额度=政策面(翻日不废);今日的奖罚净额会从额度里加减,所以钱包余额可能小于日额度。</p>
+      <label>临时加粮(元;把今日奖罚净额重置为这笔,翻日自废,余额立即刷新)</label>
+      <div className="row">
+        <input type="number" min="1" step="1" value={recharge} onChange={(e) => setRecharge(Number(e.target.value))} />
+        <button onClick={() => save('/api/admin/recharge', { amount: Number(recharge) }, `已充值 ¥${recharge}(今日有效,余额已刷新)`)}>充值</button>
+      </div>
     </div>
   );
 }

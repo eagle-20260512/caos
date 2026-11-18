@@ -510,6 +510,12 @@ export async function drainOnce() {
   try {
     let events = readEvents();
     const done = readCursor();
+    // [2026-11-18 公开版接线] 五维势差 P 每 pass 落账(ca-pvector 与完整本体同源),供 X-Ray 五维条读取。
+    try {
+      const { computeP } = await import('./ca-pvector.mjs');
+      const pv = computeP({ events, done });
+      log({ event: 'pvector', P: pv.P, gaps: pv.gaps, dominant: pv.dominant, evidence: pv.evidence });
+    } catch (e) { log({ event: 'pvector-error', err: String(e?.message ?? e).slice(0, 140) }); }
     // Recovery 三重对账(2026-11-08 v1.4 §四 适配批):每拍开头机械验 快照hash/账体连贯/LLM面;
     // 异常=降级落账照跑(绝不拒启=自锁引信);对账器为可选组件,未装=跳过。
     try {

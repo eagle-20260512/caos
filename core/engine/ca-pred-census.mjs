@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // ca-pred-census.mjs — 预测四态登记普查:open / hit / miss / invalid
 // 并与叙事账(state/narrative-view.json)对账:prediction 类节点数 vs 预测账总数。
-// 用法:node engine/ca-pred-census.mjs [--json]
+// 用法:node loop/ca-pred-census.mjs [--json]
 // 退出码:0=一致;1=存在不可解析行或对账缺口(供机械断言用)
 import fs from "node:fs";
 
-const HOME = process.env.CA_HOME ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const HOME = process.env.CA_HOME || decodeURIComponent(new URL('..', import.meta.url).pathname);
 const PRED = `${HOME}/ledgers/predictions.jsonl`;
 const VIEW = `${HOME}/state/narrative-view.json`;
 

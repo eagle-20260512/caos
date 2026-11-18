@@ -8,7 +8,7 @@
 //   ④超时熔断:30s 内静默不下来=宁不归档,绝不强 mv;写 archive-timeout 进审计账退出码 3
 // 权限:chattr 须 root——本器由部署者/运维经 sudo 运行,CA 无权自跑(谋改宪法区同格:物理边界非仪式)。
 // 审计:ledgers/archive-audit.jsonl(append-only)逐卷留 sha256/字节数/去向,账实可查。
-// 用法:sudo node engine/ca-archiver.mjs <ledger名,如 loop> [--max-wait 30]
+// 用法:sudo node loop/ca-archiver.mjs <ledger名,如 loop> [--max-wait 30]
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, renameSync, openSync, closeSync } from 'node:fs';
 import { execSync, spawnSync } from 'node:child_process';
 import path from 'node:path';

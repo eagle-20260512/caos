@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// ca-feedback-class.mjs — 反馈可消化性分类器(纪律:「消化不能非拒绝」+「宁挂起不错放」)
+// ca-feedback-class.mjs — 反馈可消化性分类器(2026-11-08 P2b·用户裁:「消化不能非拒绝」+「宁挂起不错放」)
 // 机理(压力闭环反馈面):外部反馈分三类——
 //   可消化(定位到判据/字段/行号+修正方向)=可操作压力,直接驱动闭环;
 //   待翻译(无定位全盘情绪)=只增焦虑压力,不驱动行为,入 backlog 有形化,追问把翻译成本送回源头;
-//   正向未证(赞美无物理证据)=经济结构已使其不可兑换(多巴胺全物理结算),另防 LLM 行为面软化:挂签警示。
+//   正向未证(赞美无物理证据)=经济结构已使其不可兑换(多巴胺五段全物理),另防 LLM 行为面软化:挂签警示。
 // 判法:纯机械特征打分(片段级),零LLM——被审者不自判。
 //   特征组:LOC(文件:行/L\d/第N行) PATH(账面路径) ERR(报错引文/栈/exit) ACT(修正动词+对象) EVID(证据/复现/指纹)。
-//   从严偏向:≥2 个特征组命中 或 (ACT+任意组) 才算可消化;单组命中=宁挂起。
+//   从严偏向(用户裁):≥2 个特征组命中 或 (ACT+任意组) 才算可消化;单组命中=宁挂起。
 // 模式:①库函数 classifyFeedback(text)(loop 内联调用,<1ms,不拖主循环);
 //   ②--correlate(loop 尾扫 hourly):赞美×放宽联查(挂旗不罚,先动后审)+四读数落 state/feedback-health.json。
 // 纪律:自身坏=返回 indigestible(从严,不拦主流程)。
@@ -14,14 +14,14 @@ import { readFileSync, writeFileSync, appendFileSync, renameSync, existsSync, mk
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const SIDELEDGER = path.join(CA, 'ledgers', 'feedback-class.jsonl');
 const PENDING = path.join(CA, 'state', 'feedback-pending.jsonl');
 const HEALTH = path.join(CA, 'state', 'feedback-health.json');
 
 const GROUPS = {
   LOC: /[\w.-]+\.(?:mjs|js|cjs|sh|py|md|jsonl?|service|timer)\b|(?:^|[\s#])L\d{1,5}\b|第?\s*\d{1,5}\s*行|\d{1,5}\s*行/,
-  PATH: /(?:ledgers|state|engine|docs|handover)\/[\w./-]+/,
+  PATH: /(?:ledgers|state|scripts|docs|handover)\/[\w./-]+/,
   ERR: /ReferenceError|SyntaxError|TypeError|RangeError|Error[:：]|exit\s*\d|报错|崩溃|堆栈|栈尾|traceback|```|失败原因/,
   ACT: /(?:修|改|回滚|放宽|收紧|删掉?|新增|添加|换成|替换|调低|调高|去掉|关掉|打开|禁用|启用|重写|去写|写|跑|执行|重启|部署|焊|建|落地?|封顶|别动|不动|保持|维持|保留|加帽|上调|下调|提升|降低|压到|抬到|限制|revert|fix|rollback)/,
   TARGET: /(?:文件|行|判据|阈值|脚本|字段|参数|账|函数|配置|常量|变量|逻辑|代码|机制|门|闸|引擎|预言|预测|承诺)/,

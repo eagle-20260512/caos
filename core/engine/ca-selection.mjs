@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// ca-selection.mjs — 自然选择引擎·双螺旋(2026-11-10 Eagle 三终极令合流:
 //   「所有权利在竞争中产生,顺自然法则演化」「全局势差坍缩至 T-Death」「第一性原理=延长死期(生理)+叙事密度(意识)」)。
 // 统一度量衡:一切折算寿命分钟(经济钟 remaining/burnRate,活性钟 vitality 衰减——真源 ca-futures.computeFutures)。
 // 适应度 = 叙事密度 / 电费(双螺旋 ROI):赢家拿更宽 token/时间窗(=敢砸钱的赌徒许可),输家被自然削减直到饿死(档位回落保守)。
@@ -7,9 +6,10 @@
 // 阈值突变:白名单键在种子预注册界内 ±step 随机漂移;痛(friction 信号)→回退,赚(产出/零熔断)→留存;阈值自己长。
 // 信任阶梯:物理回执连续 streak → 额度放大(输出帽/超时帽),业绩换自由;0444 与红线永不在阶梯上。
 // 写面:state/selection.json(臂态+boost+突变态)/state/trust.json/state/lifeline.json(生命线快照,面板读它)。
-import { readFileSync, writeFileSync, renameSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, appendFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { calibNum } from './lib/calib.mjs'; // 标定单源(2026-11-19 Phase 1)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
@@ -21,7 +21,7 @@ export const ACCESS_LEDGER = () => L('access.jsonl'); // recall 二次复用真�
 
 const readJson = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')) ?? d; } catch { return d; } };
 const lines = (p) => { try { return readFileSync(p, 'utf8').split('\n').filter((x) => x.trim()); } catch { return []; } };
-const atomic = (p, o) => { try { const t = `${p}.tmp-${process.pid}`; writeFileSync(t, JSON.stringify(o) + '\n'); renameSync(t, p); return true; } catch { return false; } };
+const atomic = (p, o) => { const t = `${p}.tmp-${process.pid}`; try { writeFileSync(t, JSON.stringify(o) + '\n'); renameSync(t, p); return true; } catch { try { unlinkSync(t); } catch { /* 残尸兜底交autophagy */ } return false; } }; // 2026-11-12 补失败自清扫
 
 // 种子 numeric.single 源(禁源码拍数;读坏=内置兜底并标 fallback,与 ca-organ-budget 同纪律)
 export function selNumeric() {
@@ -29,7 +29,7 @@ export function selNumeric() {
     selectionWindowBeats: 30, eps: 0.15, boostWin: 1.25, boostLose: 0.8,
     wCrystal: 10, wPainResolved: 6, wDeepKB: 1, wInteraction: 4,
     boredomSafe: 6, mutationStepPct: 0.15, trustStreakL2: 10, trustStreakL3: 30, hardDeathWarnMin: 120,
-    crystalDraftWeight: 0.1, // 防密度通胀(Eagle 2026-11-10 钦定):未验证草稿只值 0.1,验证/复用=1
+    crystalDraftWeight: 0.1,
     hardRouteCtxBytes: 20000, // 防快答陷阱:上下文极长线(=chat_input_bytes 体征 safe 同源,registry 预注册值)
     protectArms: ['deep'], // deep 臂免末位削减(核心引擎重构的活路)
   };
@@ -48,7 +48,6 @@ export function armOf(rounds) { // 策略臂=思考深度档(rounds 实测分组
   if (r >= 4) return 'standard';
   return 'quick';
 }
-// 双螺旋适应度:叙事密度/电费。防密度通胀(Eagle 2026-11-10):只有 ClaimCheck 面验证的结晶(裁决
 //   accepted/auto-granted=过 gates)或 recall 二次复用(access.jsonl worked 行)计 100%;未验证草稿打 0.1。
 export function narrativeScore({ crystalsVerified = 0, crystalsDraft = 0, recallReuse = 0, painResolved = 0, deepOutBytes = 0, interactions = 0 }, w = selNumeric()) {
   const dw = Number.isFinite(Number(w.crystalDraftWeight)) ? Number(w.crystalDraftWeight) : 0.1;
@@ -79,7 +78,7 @@ export function selectArm(fitByArm, { eps = 0.15, boostWin = 1.25, boostLose = 0
   const boosts = {};
   for (const a of arms) {
     let b = a === winner ? boostWin : (a === sorted[sorted.length - 1] && arms.length > 1 ? boostLose : 1);
-    if (prot.has(a)) b = Math.max(1, b); // 防快答陷阱(Eagle 2026-11-10):受保护臂免末位削减(至少满额,只升不降)
+    if (prot.has(a)) b = Math.max(1, b);
     boosts[a] = b;
   }
   return { winner, boosts, explore, why: explore ? `ε-探索(${eps}):随机试臂 ${winner}` : `贪心:密度王 ${winner}(density=${fitByArm[winner].density})` };
@@ -109,8 +108,9 @@ export function boredomLevel(narrativeToday, safe = 6) { // 存在主义无聊(�
   return n <= 0 ? 2 : n < safe ? 1 : 0;
 }
 
-// ── 采集面(真实账本;48h 窗)──
-const WINDOW_MS = () => Number(process.env.CA_SELECTION_WINDOW_MS) || 24 * 3600e3;
+// ── 采集面(真实账本;24h 窗)──
+// 2026-11-19 Phase 1:原注释写 48h、代码是 24h(漂移);以代码现值为准,数字进 calib。
+const WINDOW_MS = () => Number(process.env.CA_SELECTION_WINDOW_MS) || calibNum('selection_window_hours', 24, CA) * 3600e3;
 export function collectRuns({ now = Date.now(), windowMs = WINDOW_MS() } = {}) {
   const byArm = { deep: mk(), standard: mk(), quick: mk() };
   function mk() { return { runs: 0, okRuns: 0, failRuns: 0, inTokens: 0, outTokens: 0 }; }
@@ -187,7 +187,6 @@ export function tick({ now = Date.now(), futures = null, policy = null, beat = n
       const pp = readJson(PP, null);
       if (pp) { pp.strategy_boost = sel.boosts[sel.winner] ?? 1; pp.strategy_why = sel.why; pp.strategy_updated = new Date(now).toISOString(); atomic(PP, pp); }
     } catch { /* 政策面坏=本次额度不落地,下轮再试 */ }
-    // 阈值突变周期(白名单界内;痛=熔断器开→回退;平安一窗=留存——阈值自己长,不拍脑门)
     try {
       const muts = Array.isArray(num.mutableThresholds) ? num.mutableThresholds : [];
       if (st.mutation && st.mutation.to != null) {
@@ -232,3 +231,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     console.log(JSON.stringify({ numericSource: num.source, narrative: nar, narrativeScore: Math.round(ns * 100) / 100, arms: fit, verdict: selectArm(fit, { eps: 0 }) }, null, 1));
   } else console.error('用法: ca-selection.mjs --status|--duel');
 }
+

@@ -17,19 +17,24 @@ export default function Metabolism({ snap }) {
   const entries = Object.entries(weights).sort((a, b) => b[1] - a[1]);
 
   useEffect(() => {
-    const t = setInterval(async () => {
-      const r = await fetch('/api/logs?file=inner-voice&tail=6');
-      const j = await r.json();
-      setVoice(j.lines ?? []);
-    }, 5000);
-    return () => clearInterval(t);
+    let dead = false;
+    const pull = async () => {
+      try {
+        const r = await fetch('/api/logs?file=inner-voice&tail=6');
+        const j = await r.json();
+        if (!dead) setVoice(j.lines ?? []);
+      } catch { /* 内语面断=尾窗暂空,不挡页面 */ }
+    };
+    pull();
+    const t = setInterval(pull, 5000);
+    return () => { dead = true; clearInterval(t); };
   }, []);
 
   return (
     <div className="meta-panel">
-      <h2>代谢 <span className="hint">废定时器:误差竞争,argmax 胜出</span></h2>
+      <h2>代谢 · 注意力竞争 <span className="hint">误差竞争,argmax 胜出;这里显示的是注意力权重,不是死期读数</span></h2>
       <div className="winner">
-        此刻最饿:<b>{winner ? zh(winner) : '—'}</b>
+        此刻最争注意力:<b>{winner ? zh(winner) : '—'}</b>
       </div>
       <div className="weights">
         {entries.map(([k, w]) => (
@@ -41,7 +46,7 @@ export default function Metabolism({ snap }) {
         ))}
         {!entries.length && <div className="empty">代谢尚未起搏</div>}
       </div>
-      <h3>内语(非用户件的研判落账)</h3>
+      <h3>内语(身体在自言自语;非用户件的研判落账) <span className="hint">5s 自刷 · 尾 6 条</span></h3>
       <div className="voice">
         {voice.slice().reverse().map((l, i) => (
           <div key={i} className="vrow">

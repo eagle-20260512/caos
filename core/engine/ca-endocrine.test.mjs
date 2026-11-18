@@ -5,6 +5,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 let pass = 0, fail = 0;
 const assert = (cond, name, extra = '') => {
@@ -39,12 +41,12 @@ const ed = await import('./ca-endocrine.mjs');
   // 沙箱 run:政策文件落盘+EMA 态持久;读坏样本coef=null → mode normal
   const dir = mkdtempSync(path.join(tmpdir(), 'endo-'));
   const env = { ...process.env, CA_HOME: dir, CA_ENDOCRINE_STATE: path.join(dir, 'endocrine.json'), CA_ENDOCRINE_POLICY: path.join(dir, 'policy.json') };
-  const r = spawnSync('node', ['--input-type=module', '-e', `import('./ca-endocrine.mjs').then(m => console.log(JSON.stringify(m.run())))`], { encoding: 'utf8', env, timeout: 30_000 });
+  const r = spawnSync('node', ['--input-type=module', '-e', `import('./ca-endocrine.mjs').then(m => console.log(JSON.stringify(m.run())))`], { encoding: 'utf8', env, timeout: 30_000, cwd: HERE });
   let out = null; try { out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { }
   assert(r.status === 0 && out?.policy?.mode === 'normal', 'run:沙箱(慢信号坏)→normal 政策', r.stderr.slice(0, 150));
   const pol = JSON.parse(readFileSync(path.join(dir, 'policy.json'), 'utf8'));
   assert(pol.heartbeat_s === 60 && pol.max_llm_tokens === 4000, 'run:政策文件落盘且字段齐', JSON.stringify(pol));
-  const r2 = spawnSync('node', ['--input-type=module', '-e', `import('./ca-endocrine.mjs').then(m => console.log(JSON.stringify(m.refreshPolicy())))`], { encoding: 'utf8', env, timeout: 30_000 });
+  const r2 = spawnSync('node', ['--input-type=module', '-e', `import('./ca-endocrine.mjs').then(m => console.log(JSON.stringify(m.refreshPolicy())))`], { encoding: 'utf8', env, timeout: 30_000, cwd: HERE });
   let out2 = null; try { out2 = JSON.parse(r2.stdout.trim().split('\n').pop()); } catch { }
   assert(r2.status === 0 && out2?.reused === true, 'refresh:60min 内复用政策(不重算)', JSON.stringify(out2));
   rmSync(dir, { recursive: true, force: true });

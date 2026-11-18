@@ -4,11 +4,13 @@
 set -e
 CA_HOME=${CA_HOME:-/ca}
 
-mkdir -p "$CA_HOME/ledgers" "$CA_HOME/state" "$CA_HOME/narrative" "$CA_HOME/backpacks" "$CA_HOME/config" "$CA_HOME/data" "$CA_HOME/engine"
+mkdir -p "$CA_HOME/ledgers" "$CA_HOME/state" "$CA_HOME/narrative" "$CA_HOME/backpacks" "$CA_HOME/config" "$CA_HOME/data" "$CA_HOME/engine" \
+  "$CA_HOME/memory/store/prompts" "$CA_HOME/memory/store/cards" "$CA_HOME/work" "$CA_HOME/backups"
 
 if [ ! -f "$CA_HOME/engine/.seeded-$(cat /opt/caos/engine/VERSION 2>/dev/null || echo v0)" ]; then
   if [ -z "$(ls -A "$CA_HOME/engine" 2>/dev/null | grep -v '^\.seeded' || true)" ]; then
-    cp /opt/caos/engine/*.mjs "$CA_HOME/engine/"
+    # 整目录播种(含 lib/;旧版只拷 *.mjs,lib 依赖会缺)
+    cp -R /opt/caos/engine/. "$CA_HOME/engine/"
     echo "seeded engine → $CA_HOME/engine"
   fi
 fi

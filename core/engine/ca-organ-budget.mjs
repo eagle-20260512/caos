@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// ca-organ-budget.mjs — 思考预算·内生器官(2026-11-10 Eagle 三令合一:
-//   「预算应尽 内稳态」「预算机制必须内生 不能拍脑门定」「把 CC 的能力同构给 loop」)。
 // 同构移植第一件:CC 的工作方式=测了再定、连续重测、状态调制——循环里不留死常数。
 // 数学(全部从实测分布与预注册单源派生;源码零新拍数):
 //   margin  = clamp( P95(实分开销), floors.marginMin, wallCap − floors.marginLtWallGap )
@@ -18,7 +16,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// 压力口径排除集单源(2026-11-10 Eagle 令「A/B 测试权交 CA」配套):非「身体的痛」账——①homeostasis-zone=
 //   测量者自己的留账自噪声;②reply-verdict/③short-reply-gate=每回复例行质量门,随活跃度线性涨,不是故障。
 //   消费面=homeostasis slow_pressure_24h 传感器 + ab-budget-knobs-igniter 公式臂 safety 判据(同一集合,禁两套标准)。
 export const PRESSURE_EXCLUDE_KINDS = ['homeostasis-zone', 'reply-verdict', 'short-reply-gate'];
@@ -62,7 +59,7 @@ export function readFloors(seedPath = SEED_FILE()) { // 预注册单源;读坏=�
   } catch { /* 落兜底 */ }
   return { marginMin: 5000, marginLtWallGap: 30000, wallMin: 60000, source: 'fallback' };
 }
-export function computeMargin({ wallCapMs, overhead, wrapup, floors, includeWrapup = true } = {}) { // 内生 margin(endocrine 同步写政策面用);includeWrapup=false=B 臂口径(截断产物不入 margin,Eagle 裁决①剔循环论证)
+export function computeMargin({ wallCapMs, overhead, wrapup, floors, includeWrapup = true } = {}) {
   const wall = Number(wallCapMs);
   if (!Number.isFinite(wall) || wall <= 0) return { ok: false, why: 'wallCap 坏读数,不脑补' };
   const fl = floors ?? readFloors();
@@ -70,17 +67,13 @@ export function computeMargin({ wallCapMs, overhead, wrapup, floors, includeWrap
   const wuP95 = pctl(wrapup, 0.95);
   // margin = 事前开销 P95 [+ 自帽后收口 P95](2026-11-10 实弹第一课:只测事前=预算贴墙,收口撞墙钟被硬杀
   //   organ-crash,ev-mw9w80py)。收口实测=自帽行 ms−当时预算(当时预算=60000 历史档,账上事实非新拍数)。
-  //   [2026-11-10 Eagle 双裁决]收口项=被截断轮次才产生的时间,把它计入下轮 margin=「越撞帽→margin 越大→
   //   预算越小→越撞帽」的循环论证本体(物证卷 §三);includeWrapup=false 时剔除(A 臂公式保留原口径作对照)。
   const truncPart = includeWrapup ? (Number.isFinite(wuP95) ? wuP95 : 0) : 0;
   const marginMs = Math.round(Math.min(Math.max((Number.isFinite(ovP95) ? ovP95 : fl.marginMin) + truncPart, fl.marginMin), wall - fl.marginLtWallGap));
   const n = (overhead ?? []).filter(Number.isFinite).length;
   return { ok: true, marginMs, ovP95, wuP95, includeWrapup, n, why: `margin=P95(事前开销,n=${n})${Math.round(ovP95 ?? 0)}${includeWrapup ? `+P95(自帽收口,n=${(wrapup ?? []).filter(Number.isFinite).length})${Math.round(wuP95 ?? 0)}` : '(收口截断项剔除=Eagle 裁决①)'}=${Math.round(marginMs)}ms;上限=wall−${fl.marginLtWallGap}(种子约束:净思考≥30s);floors=${fl.source}` };
 }
-// variant(2026-11-10 Eagle 钦令公式臂,预注册=experiments/ab-budget-knobs.seed.json formula_ab):
 //   'A_net_scaled'(默认,现状)=budget=max(marginMin,(wall−margin_trunc)×scale) —— scale 乘净额=截断项+双重打折对照臂
-//   'B_wall_scaled_notrunc'   =budget=max(marginMin, wall×scale−margin_notrunc) —— scale 作用在 wall 上(Eagle 裁决②),
-//     margin 只含事前开销 P95(Eagle 裁决①)。fail-closed:variant 坏值=A。
 export function computeBudget({ wallCapMs, overhead, wrapup, demand, economy, floors, variant = 'A_net_scaled', now = new Date().toISOString() } = {}) {
   const isB = variant === 'B_wall_scaled_notrunc';
   const mg = computeMargin({ wallCapMs, overhead, wrapup, floors, includeWrapup: !isB });
@@ -165,3 +158,4 @@ export async function currentBudget({ wallCapMs, now = Date.now() } = {}) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   currentBudget().then((b) => { console.log(JSON.stringify(b, null, 1)); }).catch((e) => { console.error(String(e?.stack ?? e)); process.exit(2); });
 }
+

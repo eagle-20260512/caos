@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // ca-view-census.mjs —— narrative-view 的独立查询器(禁信任何工具的 stdout 自报)
-// 用法: node engine/ca-view-census.mjs [--json]
+// 用法: node loop/ca-view-census.mjs [--json]
 // 只管数,不管写;exit 0 = 账实一致(nodeCount == len(nodes) 且无重复 id),否则 exit 1
 import fs from "node:fs";
 import path from "node:path";
 
-const HOME = process.env.CA_HOME ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const HOME = process.env.CA_HOME || decodeURIComponent(new URL('..', import.meta.url).pathname);
 const VIEW = path.join(HOME, "state", "narrative-view.json");
 
 const out = { ok: false, file: VIEW, errors: [] };

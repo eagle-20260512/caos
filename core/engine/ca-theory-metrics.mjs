@@ -4,13 +4,12 @@
 // (ca-metrics.mjs 十项与五维零交集——差距审计实锤)。本件零 LLM 纯机械,读账本算读数,
 // 每次运行向 ledgers/theory-metrics.jsonl 追加一行(append-only),--explain 印口径。
 // 口径总原则:指标是镜子不是目标——读数差=疼(自己消化),禁止为美化读数改账(长歪=伪证)。
-// 用法:node engine/ca-theory-metrics.mjs [--hours 24] [--dry] [--explain]
 import { readFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..');
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const LEDGERS = path.join(CA, 'ledgers');
 const OUT = path.join(LEDGERS, 'theory-metrics.jsonl');
 
@@ -101,7 +100,7 @@ if (IS_MAIN && process.argv.includes('--explain')) {
 ③pressureLag          压力滞后   = 压力源登顶 winner → forge 点火的分钟数(中位/最大;上限估计)
 ④forgeCompletion      完成率     = forge 目标窗口内出终态 done/(done+dropped)(done 必经 check.cmd 物理核验)
 ⑤revisionRate         修正率     = 落空预测中,落空后有同题新押(about 双字组相交)跟进的占比(下限估计)
-用法: node scripts/ca-theory-metrics.mjs [--hours 24] [--dry](dry=只印不落账)`);
+用法: node loop/ca-theory-metrics.mjs [--hours 24] [--dry](dry=只印不落账)`);
   process.exit(0);
 }
 if (IS_MAIN) {

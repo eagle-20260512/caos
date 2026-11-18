@@ -6,14 +6,14 @@
 // 本工具做的事:从叙事账(narrative/events.jsonl,append-only 状态机)派生真值 ——
 //   每个事件 id 取最后一条 state,dreamDebt = 仍 state=open 的事件数。
 // 用法:
-//   node scripts/ca-dream-debt.mjs            打印 {derived,stored,drift,weights}
-//   node scripts/ca-dream-debt.mjs --quiet     只退出码:0=一致,3=漂移,4=派生失败
+//   node loop/ca-dream-debt.mjs            打印 {derived,stored,drift,weights}
+//   node loop/ca-dream-debt.mjs --quiet     只退出码:0=一致,3=漂移,4=派生失败
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..'); // [2026-11-10 移植式根修] web engine 语境 CA_HOME 优先(与引擎各族同款;移植自母体 2026-11-10 方舟窗)
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const EV = path.join(CA, 'narrative', 'events.jsonl');
 const IGNITE = path.join(CA, 'state', 'ignite.json');
 
@@ -25,7 +25,8 @@ export const KEEP_HOT = 200; // 热工作窗:最近 200 个「事件」(按 id �
 //   热窗内的 open 事件是正在进行的活,不该算成「未巩固积压」;
 //   只有落到热窗之外还 open 的(backlogOpen)才是真积压 → ignite.dreamCount 只能等于 backlogOpen。
 export function deriveDebt({ keep = KEEP_HOT } = {}) {
-  const lines = readFileSync(EV, 'utf8').split('\n').filter((l) => l.trim());
+  let lines = [];
+  try { lines = readFileSync(EV, 'utf8').split('\n').filter((l) => l.trim()); } catch { /* 新家无叙事事件=零债,不是错 */ }
   const last = new Map(); // id -> 最后一条 state
   const order = []; // id 首次出现序 = 事件序
   const seen = new Set();

@@ -6,13 +6,37 @@
 // 内容:①自改强制验证(快照→node --check+干导入→不过物理回滚+认知罚单)②宪法清单(单源)
 //   ③patch 挂起流(CA 谋改宪法件→不写入,改落 state/constitution-patches/ 等外部授权)。
 import { readFileSync, readdirSync, appendFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { painAppend } from './ca-pain-suppress.mjs'; // 突触抑制痛行入口(2026-11-12 四件治本令①,解锁批)
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const CA = path.resolve(HERE, '..');
+// 沙箱隔离(2026-11-15 二期施工单):CA_HOME 优先,selftest 回滚/痛觉不污染生产账(同 ca-task 先例);缺省=家根
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const SCRIPTS_DIR = path.join(CA, 'scripts');
+// 2026-11-18 修「核查闸只扫 scripts/ 顶层」:证据核验的快照面=全代码区(loop/memory/scripts/hooks 递归 .mjs)。
+//   自改验证仍用 snapshotMjs(只判 CA 自己动 scripts/ 的那一刀),两件事分开,避免回滚 CC 的并发改动。
+const CODE_DIRS = ['loop', 'memory', 'scripts', 'hooks'];
+function walkMjs(dir, out = []) {
+  let ents = [];
+  try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of ents) {
+    if (['node_modules', '.git', '.trash', 'venv', 'voice-venv'].includes(e.name)) continue;
+    const p2 = path.join(dir, e.name);
+    if (e.isDirectory()) walkMjs(p2, out);
+    else if (e.name.endsWith('.mjs')) out.push(p2);
+  }
+  return out;
+}
+// 证据核验专用快照:覆盖全部代码区(CA 宣称改 loop/ 也能被看见)
+export function snapshotCode() {
+  const snap = new Map();
+  for (const d of CODE_DIRS) for (const abs of walkMjs(path.join(CA, d))) {
+    try { snap.set(abs, readFileSync(abs, 'utf8')); } catch { snap.set(abs, null); }
+  }
+  return snap;
+}
 const INNER_VOICE = path.join(CA, 'ledgers', 'inner-voice.jsonl');
 const FRICTION = path.join(CA, 'ledgers', 'friction.jsonl');
 const PATCH_DIR = path.join(CA, 'state', 'constitution-patches');
@@ -26,7 +50,7 @@ export const CONSTITUTION = new Set([
   'write-jsonl-atomic.mjs', // 账本原子写
   'ca-recovery.mjs', 'ca-archiver.mjs', // 恢复对账+归档熔断(2026-11-08 用户批:宪法名单扩容)
   'ca-futures.mjs', 'ca-discount.mjs', 'ca-vision.mjs', // 未来推演+痛觉贴现+愿景偏差(2026-11-08 用户批:推演器锁死,CA 无权改自己的「死期算法」与「理想标准」)
-  // 宪法边界补全(差距审计实锤「宪法区比宣称的窄」):
+  // 2026-11-08 用户令·第三刀A(宪法边界补全,差距审计实锤「宪法区比宣称的窄」):
   //   代谢脑/思考器官/任务闸/编译器/叙事账本 五件入宪——调度/回写/销账/驱动包/自我叙事全是判官面,
   //   被约束者不得自改(谋改走 patch 挂起流);理论五维测量器同格(判官不可改自己的尺)。
   'ca-metabolism.mjs', 'ca-organ.mjs', 'ca-task.mjs', 'ca-compiler.mjs', 'ca-narrative.mjs',
@@ -40,7 +64,7 @@ export function patchPending({ rel, content, via, oldString }) {
   const id = `${Date.now().toString(36)}-${path.basename(rel).replace(/[^\w.-]/g, '_')}`;
   const file = path.join(PATCH_DIR, `${id}.patch.json`);
   writeFileSync(file, JSON.stringify({ ts: new Date().toISOString(), target: rel, via, oldString: oldString ?? null, content, status: 'pending', note: '宪法区谋改挂起:须外部(用户/CC)对账授权后由 root 应用;CA 不可自授' }, null, 2) + '\n');
-  try { appendFileSync(path.join(CA, 'ledgers', 'friction.jsonl'), JSON.stringify({ ts: new Date().toISOString(), kind: 'constitution-patch-pending', surface: 'constitution-gate', detail: `谋改宪法件 ${rel}(经 ${via}),已挂起:${path.relative(CA, file)}`, evidence: `state/constitution-patches/${id}.patch.json`, verified: true }) + '\n'); } catch { /* */ }
+  try { painAppend({ ts: new Date().toISOString(), kind: 'constitution-patch-pending', surface: 'constitution-gate', detail: `谋改宪法件 ${rel}(经 ${via}),已挂起:${path.relative(CA, file)}`, evidence: `state/constitution-patches/${id}.patch.json`, verified: true }, { ledger: path.join(CA, 'ledgers', 'friction.jsonl') }); } catch { /* */ }
   return `CA-REFUSE: ${rel} 属宪法区(root 只读,你改不了——死亡边界/审计器/校准脑不可由被约束者修改)。你的改动已存 patch 挂起:state/constitution-patches/${id}.patch.json,等外部对账授权。若真有必要,在 pain/内语里论证给用户听。`;
 }
 
@@ -55,8 +79,7 @@ export function diffSnapshots(before) {
       const now = existsSync(abs) ? readFileSync(abs, 'utf8') : null;
       if (prev !== now) changed.push({ abs, kind: now === null ? 'deleted' : prev === null ? 'created' : 'modified' });
     }
-    for (const f of readdirSync(SCRIPTS_DIR).filter((x) => x.endsWith('.mjs'))) {
-      const abs = path.join(SCRIPTS_DIR, f);
+    for (const d of CODE_DIRS) for (const abs of walkMjs(path.join(CA, d))) {
       if (!seen.has(abs)) changed.push({ abs, kind: 'created' });
     }
   } catch { /* 差分坏=空(从严侧由调用方定) */ }
@@ -85,7 +108,7 @@ function probeMjs(abs) {
 
 function selfEditCrashPain(rel, err, via) {
   const ts = new Date().toISOString();
-  try { appendFileSync(FRICTION, JSON.stringify({ ts, kind: 'self-evolution-crash-pain', surface: 'self-edit-gate', detail: `经 ${via} 自改 ${rel} 未过强制验证(node --check/干导入),已物理回滚:${String(err).slice(0, 160)}`, evidence: 'ledger:friction.jsonl 本行;尸体未留(用户裁:绝不保留半截语法尸体)', verified: true }) + '\n'); } catch { /* */ }
+  try { painAppend({ ts, kind: 'self-evolution-crash-pain', surface: 'self-edit-gate', detail: `经 ${via} 自改 ${rel} 未过强制验证(node --check/干导入),已物理回滚:${String(err).slice(0, 160)}`, evidence: 'ledger:friction.jsonl 本行;尸体未留(用户裁:绝不保留半截语法尸体)', verified: true }, { ledger: FRICTION }); } catch { /* */ }
   try { appendFileSync(INNER_VOICE, JSON.stringify({ ts, ev: null, type: 'self-edit-repentance', by: 'self-edit-gate(机械代记)', text: `悔过:经 ${via} 直改 ${rel},写完没跑验证,尸体被系统物理回滚(${String(err).slice(0, 80)})。为什么没跑:把「改完」当「改对」,赶工交卷。消化此痛时须自陈,并把「写完先 node --check+干导入再报完成」落成机械动作。` }) + '\n'); } catch { /* */ }
   try {
     const doneSet = new Set(JSON.parse(readFileSync(path.join(CA, 'state', 'loop-cursor.json'), 'utf8')).done ?? []);

@@ -27,6 +27,8 @@ export async function registerCa(app, { CA }) {
     const pv = [...readRows(path.join(CA, 'ledgers/loop.jsonl'))].reverse().find((r) => r.event === 'pvector') ?? null;
     // 钱包
     const wallet = readJson(path.join(CA, 'state/wallet.json'));
+    // 四情绪轴现值(plan 第2项:emotion.json 进 CA 家账;hormTick 每 tick 落,缺=如实 null)
+    const emotion = readJson(path.join(CA, 'memory/store/emotion.json'));
     // 验收三条+P5 三条:历史曲线最近一行
     const accRows = readRows(path.join(CA, 'memory/store/acceptance-history.jsonl'));
     const acceptance = accRows[accRows.length - 1] ?? null;
@@ -46,6 +48,7 @@ export async function registerCa(app, { CA }) {
       ts: new Date().toISOString(),
       pvector: pv ? { ts: pv.ts, P: pv.P, thresholds: pv.thresholds, dominant: pv.dominant } : null,
       wallet: wallet ? { date: wallet.date, remainingCny: wallet.remainingCny, pct: wallet.pct, burnedCny: wallet.burnedCny } : null,
+      emotion: emotion ? { ts: emotion.ts, lonely: emotion.lonely ?? null, curious: emotion.curious ?? null, guilty: emotion.guilty ?? null, proud: emotion.proud ?? null } : null,
       acceptance: acceptance ? { ts: acceptance.ts, saveTokenPass: acceptance.saveTokenPass ?? null, hitRate: acceptance.hitRate ?? null, correction: acceptance.correction ?? null, p5_27: acceptance.p5_27_respondMiss ?? null, p5_28: acceptance.p5_28_stateRecallDeterminism ?? null, p5_29: acceptance.p5_29_feedAdaptive ?? null } : null,
       observer: observer ? { ts: observer.ts, verdict: observer.verdict, sameTypeRatio: observer.metrics?.sameTypeRatio ?? null, guardCov: observer.metrics?.guardCov ?? null, distillThput: observer.metrics?.distillThput ?? null, divergence: observer.divergence ?? null } : null,
       audit: audit ? { ok: audit.verdict?.ok ?? null, why: audit.verdict?.why ?? null, graph: audit.graph ?? null, cards: audit.metrics?.knowledgeN ?? null } : null,

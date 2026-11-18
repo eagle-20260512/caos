@@ -11,7 +11,8 @@ export async function registerChat(app, { CA }) {
     const text = String(req.body?.text ?? '').trim();
     if (!text) return reply.code(400).send({ error: 'empty text' });
     const id = `ev-web-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
-    const ev = { id, type: 'user-say', text: text.slice(0, 8000), ts: new Date().toISOString() };
+    const trace = `t${Date.now().toString(36)}${randomBytes(2).toString('hex')}`; // 全链路追踪 Trace ID(拦截面发,各账可 join)
+    const ev = { id, type: 'user-say', text: text.slice(0, 8000), ts: new Date().toISOString(), trace };
     try {
       mkdirSync(path.dirname(QUEUE), { recursive: true });
       appendFileSync(QUEUE, JSON.stringify(ev) + '\n');

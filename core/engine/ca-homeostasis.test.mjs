@@ -89,7 +89,7 @@ const sandbox = () => {
   const state = path.join(dir, 'homeostasis.json');
   return { dir, friction, cands, state, env: { ...process.env, CA_HOME: dir, CA_HOMEOSTASIS_FRICTION: friction, CA_HOMEOSTASIS_CANDS: cands, CA_HOMEOSTASIS_STATE: state, CA_HOMEOSTASIS_REGISTRY: path.join(dir, 'registry.json') } };
 };
-const runModule = (env, code) => spawnSync('node', ['--input-type=module', '-e', code], { encoding: 'utf8', env, timeout: 30_000 });
+const runModule = (env, code) => spawnSync('node', ['--input-type=module', '-e', code], { encoding: 'utf8', env, timeout: 30_000, cwd: HERE });
 
 {
   // 压力极限测试①:传感器全灭(注册表指向不存在的传感器)→ 0.5 兜底,不崩
@@ -100,7 +100,7 @@ const runModule = (env, code) => spawnSync('node', ['--input-type=module', '-e',
     x1: { sensor: { fn: 'no-such-sensor' }, dir: 'high', safe: 1, red: 2 },
     x2: { sensor: { cmd: 'exit 3' }, dir: 'high', safe: 1, red: 2 },
   }));
-  const r = runModule(s.env, 'import("./scripts/ca-homeostasis.mjs").then(m => { const f = m.freedom({ maxAgeMs: 0 }); console.log(JSON.stringify({ freedom: f.freedom, fallback: f.fallback, readableN: f.readableN, mode: f.mode })); })');
+  const r = runModule(s.env, 'import("./ca-homeostasis.mjs").then(m => { const f = m.freedom({ maxAgeMs: 0 }); console.log(JSON.stringify({ freedom: f.freedom, fallback: f.fallback, readableN: f.readableN, mode: f.mode })); })');
   let out = null; try { out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { }
   assert(r.status === 0 && out && out.fallback === true && out.freedom === 0.5 && out.readableN === 0, 'stress:传感器全灭=兜底 0.5 不崩', r.stderr.slice(0, 200) + JSON.stringify(out));
   rmSync(s.dir, { recursive: true, force: true });
@@ -110,7 +110,7 @@ const runModule = (env, code) => spawnSync('node', ['--input-type=module', '-e',
   const s = sandbox();
   mkdirSync(path.join(s.dir, 'state'), { recursive: true });
   writeFileSync(path.join(s.dir, 'state', 'event-queue.jsonl'), Array.from({ length: 100 }, (_, i) => JSON.stringify({ id: `ev-${i}`, type: 'tension-x', text: 'x' })).join('\n') + '\n');
-  const code = 'import("./scripts/ca-homeostasis.mjs").then(m => { const f = m.freedom({ maxAgeMs: 0 }); console.log(JSON.stringify({ freedom: f.freedom, mode: f.mode, qp: f.signals.narrative_queue_pending?.value, gate: m.gateDecision(f, { purpose: "autonomous:x" }), p1: m.gateDecision(f, { purpose: "P1 user-order" }).allowed })); })';
+  const code = 'import("./ca-homeostasis.mjs").then(m => { const f = m.freedom({ maxAgeMs: 0 }); console.log(JSON.stringify({ freedom: f.freedom, mode: f.mode, qp: f.signals.narrative_queue_pending?.value, gate: m.gateDecision(f, { purpose: "autonomous:x" }), p1: m.gateDecision(f, { purpose: "P1 user-order" }).allowed })); })';
   const r = runModule(s.env, code);
   let out = null; try { out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { }
   assert(r.status === 0 && out && out.qp === 100 && out.freedom < 0.3 && out.mode === 'survival' && out.gate.allowed === false && out.p1 === true, 'stress:100 行积压→survival 拒非核心+P1 通行', JSON.stringify(out));
@@ -121,7 +121,7 @@ const runModule = (env, code) => spawnSync('node', ['--input-type=module', '-e',
   // 反射弧全周期:3 败→Open→冷却→Half-Open 探测→成功→Closed;失败信号入信号账
   const s = sandbox();
   const code = `
-import('./scripts/ca-homeostasis.mjs').then(m => {
+import('./ca-homeostasis.mjs').then(m => {
   const N = Date.now();
   m.recordFailure({ kind: 'tool-refuse', surface: 'tool:bash', detail: 'CA-REFUSE: x', weight: 'light', now: N });
   m.recordFailure({ kind: 'tool-refuse', surface: 'tool:bash', detail: 'CA-REFUSE: y', weight: 'light', now: N + 1 });
@@ -143,7 +143,7 @@ import('./scripts/ca-homeostasis.mjs').then(m => {
   // B 臂(CA_HOMEOSTASIS=0):gate 全放行(legacy),读数照算
   const s = sandbox();
   const env = { ...s.env, CA_HOMEOSTASIS: '0' };
-  const code = 'import("./scripts/ca-homeostasis.mjs").then(m => { const f = m.freedom({ maxAgeMs: 0 }); console.log(JSON.stringify({ gate: m.gateDecision({ freedom: 0.1, mode: "survival" }, { purpose: "autonomous:x" }) })); })';
+  const code = 'import("./ca-homeostasis.mjs").then(m => { const f = m.freedom({ maxAgeMs: 0 }); console.log(JSON.stringify({ gate: m.gateDecision({ freedom: 0.1, mode: "survival" }, { purpose: "autonomous:x" }) })); })';
   const r = runModule(env, code);
   let out = null; try { out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { }
   assert(r.status === 0 && out?.gate?.allowed === true && out.gate.legacy === true, 'ab-test:B 臂=只观察不干预');
@@ -153,7 +153,7 @@ import('./scripts/ca-homeostasis.mjs').then(m => {
   // 增益信号:候选账落行+健康回补
   const s = sandbox();
   const code = `
-import('./scripts/ca-homeostasis.mjs').then(m => {
+import('./ca-homeostasis.mjs').then(m => {
   m.recordFailure({ kind: 'x', surface: 'tool:edit_file', weight: 'heavy', now: Date.now() });
   const g = m.recordGain({ kind: 'one-shot-pass', path: 'scripts/demo.mjs', fpAtEmit: 'abc', why: 'w', now: Date.now() + 1 });
   console.log(JSON.stringify({ health: g.health }));
@@ -208,7 +208,7 @@ import('./scripts/ca-homeostasis.mjs').then(m => {
   //   backoffUntil 为空;且 effector 在 stop 后 100ms 内收到 abort(外层中断即时到达)。
   const s = sandbox();
   const code = `
-import('./scripts/ca-homeostasis.mjs').then(async (m) => {
+import('./ca-homeostasis.mjs').then(async (m) => {
   const eng = new m.HomeostasisEngine();
   let abortSeenAt = null, effectorStartedAt = null;
   const t0 = Date.now();
@@ -241,7 +241,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
   // 测试 2 Retry-After-Backoff:effector 首次 false→退避;退避后重试 true→failureCounts 归零
   const s = sandbox();
   const code = `
-import('./scripts/ca-homeostasis.mjs').then(async (m) => {
+import('./ca-homeostasis.mjs').then(async (m) => {
   const eng = new m.HomeostasisEngine();
   let calls = 0;
   eng.register({
@@ -266,7 +266,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
   // 测试 3 Reset-States 后首轮:stop({resetStates:true})+start(),传感器正常;首轮 effectorCmd 收到 oldZone='NORMAL'
   const s = sandbox();
   const code = `
-import('./scripts/ca-homeostasis.mjs').then(async (m) => {
+import('./ca-homeostasis.mjs').then(async (m) => {
   const eng = new m.HomeostasisEngine();
   let seenOldZones = [];
   eng.register({
@@ -293,7 +293,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
   //   signal;再 mock effector 抛 EffectorAbortedError → failureCounts 不增。
   const s = sandbox();
   const code = `
-import('./scripts/ca-homeostasis.mjs').then(async (m) => {
+import('./ca-homeostasis.mjs').then(async (m) => {
   const eng = new m.HomeostasisEngine();
   let fallbackSignalAborted = null;
   let phase = 0;
@@ -336,7 +336,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
   writeFileSync(path.join(s.dir, 'state', 'event-queue.jsonl'), qlines.join('\n') + '\n');
   // 游标:消化掉 7 条 pain(行号 0..6)——剩 3 条未消化 pain;followup 不在本口径
   writeFileSync(path.join(s.dir, 'state', 'loop-cursor.json'), JSON.stringify({ done: [0, 1, 2, 3, 4, 5, 6], skipped: [] }));
-  const code = 'import("./scripts/ca-homeostasis.mjs").then(m => { console.log(JSON.stringify({ v: m.SENSOR_FNS.pending_refusals().value })); })';
+  const code = 'import("./ca-homeostasis.mjs").then(m => { console.log(JSON.stringify({ v: m.SENSOR_FNS.pending_refusals().value })); })';
   const r = runModule(s.env, code);
   let out = null; try { out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { }
   assert(r.status === 0 && out?.v === 3, 'sensor:pending_refusals=未消化口径(在场 10 消化 7 →读 3,旧口径会读 10)', JSON.stringify(out));
@@ -362,7 +362,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
     JSON.stringify({ ts: '2020-01-01T00:00:00Z', kind: 'tool-failure', surface: 'old', detail: '窗口外不计' }),
   ];
   writeFileSync(s.friction, lines.join('\n') + '\n');
-  const code = 'import("./scripts/ca-homeostasis.mjs").then(m => { console.log(JSON.stringify({ v: m.SENSOR_FNS.friction_24h().value })); })';
+  const code = 'import("./ca-homeostasis.mjs").then(m => { console.log(JSON.stringify({ v: m.SENSOR_FNS.friction_24h().value })); })';
   const r = runModule(s.env, code);
   let out = null; try { out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { }
   assert(r.status === 0 && out?.v === 3, 'sensor:friction_24h 排除 zone+例行质量门(5 zone+7 例行+3 真信号+1 窗口外 →读 3)', JSON.stringify(out));
@@ -376,7 +376,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
   const s = sandbox();
   mkdirSync(path.join(s.dir, 'state'), { recursive: true });
   const day = new Date().toISOString().slice(0, 10);
-  const ecode = 'import("./scripts/ca-homeostasis.mjs").then(m => { console.log(JSON.stringify({ v: m.SENSOR_FNS.explore_spent_pct().value })); })';
+  const ecode = 'import("./ca-homeostasis.mjs").then(m => { console.log(JSON.stringify({ v: m.SENSOR_FNS.explore_spent_pct().value })); })';
   writeFileSync(path.join(s.dir, 'state', 'explore-budget.json'), JSON.stringify({ date: day, spawns: 2 }) + '\n');
   const r1 = runModule(s.env, ecode);
   let o1 = null; try { o1 = JSON.parse(r1.stdout.trim().split('\n').pop()); } catch { }
@@ -389,7 +389,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
   const r3 = runModule(s.env, ecode);
   let o3 = null; try { o3 = JSON.parse(r3.stdout.trim().split('\n').pop()); } catch { }
   assert(r3.status === 0 && o3?.v === 0, 'sensor:explore_spent_pct 档坏=0(镜像 readExploreBudget,禁抛崩)', JSON.stringify(o3));
-  const rcode = 'import("./scripts/ca-homeostasis.mjs").then(m => { const row = m.loadRegistry().explore_budget_pct; console.log(JSON.stringify({ fn: row?.sensor?.fn ?? null, advisory: row?.advisory === true, errs: m.registryErrors.length })); })';
+  const rcode = 'import("./ca-homeostasis.mjs").then(m => { const row = m.loadRegistry().explore_budget_pct; console.log(JSON.stringify({ fn: row?.sensor?.fn ?? null, advisory: row?.advisory === true, errs: m.registryErrors.length })); })';
   const r4 = runModule(process.env, rcode);
   let o4 = null; try { o4 = JSON.parse(r4.stdout.trim().split('\n').pop()); } catch { }
   assert(r4.status === 0 && o4?.fn === 'explore_spent_pct' && o4?.advisory === true && o4?.errs === 0, 'registry:explore_budget_pct 已换 fn 车道+advisory 注册干净', JSON.stringify(o4));
@@ -397,7 +397,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
 }
 {
   // [2026-11-09 梦债三刀·面板刀] dream_debt/promises_overdue 传感器在役+registry advisory 挂对(计数类禁锁模)
-  const rcode = 'import("./scripts/ca-homeostasis.mjs").then(m => { const v = m.SENSOR_FNS.dream_debt(); const p = m.SENSOR_FNS.promises_overdue(); const c = m.SENSOR_FNS.crystal_lag_min(); const reg = m.loadRegistry(); console.log(JSON.stringify({ debt: typeof v.value, hot: v.extra?.hotOpen ?? null, prom: typeof p.value, cryst: typeof c.value, regDebt: reg.narrative_dream_debt?.advisory === true, regProm: reg.narrative_promises_overdue?.advisory === true, regCryst: reg.narrative_crystal_lag_min?.advisory === true, errs: m.registryErrors.length })); })';
+  const rcode = 'import("./ca-homeostasis.mjs").then(m => { const v = m.SENSOR_FNS.dream_debt(); const p = m.SENSOR_FNS.promises_overdue(); const c = m.SENSOR_FNS.crystal_lag_min(); const reg = m.loadRegistry(); console.log(JSON.stringify({ debt: typeof v.value, hot: v.extra?.hotOpen ?? null, prom: typeof p.value, cryst: typeof c.value, regDebt: reg.narrative_dream_debt?.advisory === true, regProm: reg.narrative_promises_overdue?.advisory === true, regCryst: reg.narrative_crystal_lag_min?.advisory === true, errs: m.registryErrors.length })); })';
   const r = runModule(process.env, rcode);
   let o = null; try { o = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { }
   assert(r.status === 0 && o?.debt === 'number' && o?.prom === 'number' && o?.cryst === 'number' && o?.regDebt === true && o?.regProm === true && o?.regCryst === true && o?.errs === 0, 'sensor:dream_debt+promises_overdue+crystal_lag_min 在役且 registry advisory 挂对', JSON.stringify(o));
@@ -420,7 +420,7 @@ import('./scripts/ca-homeostasis.mjs').then(async (m) => {
   // [2026-11-09 假火灾实弹] note 效应器:同带停留(CRITICAL->CRITICAL 重触发)不留账,真实迁移与坏读数留账
   const s = sandbox();
   const code = `
-import('./scripts/ca-homeostasis.mjs').then(async (m) => {
+import('./ca-homeostasis.mjs').then(async (m) => {
   await m.EFFECTOR_FNS.note('x', 39, 'CRITICAL', 'CRITICAL', 38, false);  // 重触发:静默
   await m.EFFECTOR_FNS.note('x', 39, 'CRITICAL', 'CRITICAL', 38, false);  // 重触发:静默
   await m.EFFECTOR_FNS.note('x', 3, 'WARNING', 'CRITICAL', 1.2, false);   // 真迁移:留账

@@ -15,7 +15,7 @@
 //     活性锚定「可验证的物理做功」不认输入静默——队列在转但没烧 token/没改世界=照样在死。
 //     活性只做状态量与权重(P1);失忆锁/ca auth-memory 是 P2,活性真跌穿 0 或用户下令才装。
 // 读数落 state/metabolism.json(内感张力面:全体权重表+疲劳电位,器官/实验/人可读自己的饿)
-import { readFileSync, appendFileSync, writeFileSync, existsSync, statSync, renameSync } from 'node:fs';
+import { readFileSync, appendFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { staleTasks } from './ca-task.mjs'; // 批2:任务停滞=张力面一员(IS_MAIN 闸护住 CLI)
@@ -34,7 +34,7 @@ import { sweep as neuroSweep } from './ca-neuro.mjs'; // 神经系统(2026-11-10
 import { forceConserve } from './ca-endocrine.mjs'; // 绝死休克真手(T-Death 归零→conserve 硬档;与 throttle 同源单源)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CA = process.env.CA_HOME ?? path.resolve(HERE, '..'); // [2026-11-10 移植式根修+脱敏] CA_HOME 优先;checkCmd 一律 ${CA} 拼接,禁硬编宿主路径(开源脱敏+卷内功能双修)
+const CA = process.env.CA_HOME ? path.resolve(process.env.CA_HOME) : path.resolve(HERE, '..');
 const L = (r) => path.join(CA, r);
 const QUEUE = L('state/event-queue.jsonl');
 const CURSOR = L('state/loop-cursor.json');
@@ -166,7 +166,7 @@ function maybeAutogenPredict(now, ctx, weights, st, econPain) {
       expect: `progressN 从 ${t0.progressN ?? 0} 增长,或 state 变 done/dropped`,
       gain: '停滞债出清(taskDebt 权重回落)',
       cmd: `node -e 'const m=new Map();for(const l of require("fs").readFileSync("${CA}/ledgers/tasks.jsonl","utf8").split("\\n").filter(Boolean)){try{const o=JSON.parse(l);m.set(o.id,{...m.get(o.id),...o})}catch{}};const t=m.get("${t0.id}");process.exit(t&&((t.progressN??0)>${t0.progressN ?? 0}||t.state==="done"||t.state==="dropped")?0:1)'`,
-      action: `推进或关闭任务 ${t0.id}(node scripts/ca-task.mjs note|done 留证据)——它是你自己落空咬出来的债,禁拖` });
+      action: `推进或关闭任务 ${t0.id}(node loop/ca-task.mjs note|done 留证据)——它是你自己落空咬出来的债,禁拖` });
   }
   if (ctx.heartbeatStaleMin > 60 && !openWkeys.has('heartbeatStale')) candidates.push({ wkey: 'heartbeatStale', hours: 2,
     about: '心跳 2h 内复活(heartbeat.jsonl mtime 新鲜度回到 30min 内)',
@@ -179,7 +179,7 @@ function maybeAutogenPredict(now, ctx, weights, st, econPain) {
     expect: `open 且 by 过期的预言数 ≤ ${Math.floor(ctx.predOverdueN / 2)}`,
     gain: '预言积压出清(predOverdue 权重回落;账实相符)',
     cmd: `node -e 'const m=new Map();for(const l of require("fs").readFileSync("${CA}/ledgers/predictions.jsonl","utf8").split("\\n").filter(Boolean)){try{const o=JSON.parse(l);m.set(o.id,{...m.get(o.id),...o})}catch{}};const n=[...m.values()].filter(p=>p.state==="open"&&p.check&&p.check.by&&Date.parse(p.check.by)<Date.now()).length;process.exit(n<=${Math.floor(ctx.predOverdueN / 2)}?0:1)'`,
-    action: '跑对账/回填/作废过期预言(node scripts/ca-pred-*.mjs 已在役),把积压压到半数以下' });
+    action: '跑对账/回填/作废过期预言(node loop/ca-pred-*.mjs 已在役),把积压压到半数以下' });
   if (ctx.pendingN > 20 && !openWkeys.has('queueStuck')) candidates.push({ wkey: 'queueStuck', hours: 3,
     about: `队列在排 ${ctx.pendingN} 件 3h 内降到 ${Math.max(0, ctx.pendingN - 15)} 件以下`,
     expect: 'pending 显著下降',
@@ -236,7 +236,7 @@ function tick() {
   const heartbeatStaleMin = existsSync(HEARTBEAT) ? Math.max(0, Math.floor((now - statSync(HEARTBEAT).mtimeMs) / 60000)) : 9999;
   // 未巩固事件债 = 派生量(2026-11-08 执行轮:ignite.dreamCount 是 loop 每拍 +1 的计数器,只增不减,
   //   拿它当积压量→权重 n/(n+15) 永远饱和(实测 stored=200→0.93,真值 17→0.53),任务结构上销不掉。
-  //   真源=narrative/events.jsonl 每个 id 末条 state ∈{open,doing} 的计数,见 scripts/ca-dream-debt.mjs)
+  //   真源=narrative/events.jsonl 每个 id 末条 state ∈{open,doing} 的计数,见 loop/ca-dream-debt.mjs)
   let dreamDebtN = Number(readJson(IGNITE, {}).dreamCount ?? 0);
   try { dreamDebtN = deriveDebt().open; } catch { /* 派生失败退回旧读数,不毁代谢 */ }
   // 停滞任务债载(清算协议·债息+影响力):load = Σ impact_i × (0.5 + 0.5·ageH_i/(ageH_i+48))
@@ -299,7 +299,7 @@ function tick() {
   try { import('./ca-power-manager.mjs').then((pm) => pm.beatCheck({ now }).catch(() => {})).catch(() => {}); } catch { /* 休克层坏不毁心率 */ }
   try { engine.evaluate('medium').catch(() => {}); } catch { /* 引擎坏不毁心率 */ }
   try { refreshPolicy(); } catch { /* 政策坏不毁心率 */ }
-  // 主动权三律维持(2026-11-09 最高令:发言权表达欲累积/探索权点火/回声失落计账——维持者=本心跳,禁新增守护进程)
+  // 主动权三律维持(2026-11-09 最高令:发言权内容驱动/探索权点火/回声反馈计账——维持者=本心跳,禁新增守护进程)
   try { import('./ca-proactive.mjs').then((pro) => pro.maintenanceTick({ now, fatigue: Math.round((Number(fatigue) || 0) * 1000) / 1000 }).catch(() => {})).catch(() => {}); } catch { /* 主动权面坏不毁心率 */ }
   // 北极星 sweep 宿主(2026-11-10 最高令):头衔扮演扫描 30min 节流(fire-and-forget;检测→落账+势差嘴炮税)
   try { Promise.resolve(evolutionSweep({ now })).catch(() => {}); } catch { /* 演化面坏不毁心率 */ }
@@ -340,7 +340,7 @@ function tick() {
     try { appendFileSync(LOOP_LEDGER, JSON.stringify({ ts: vt.lockedAt, event: 'amnesia-locked', ticksSinceWork: vt.ticksSinceWork, note: '活性跌穿 0。他还活着,只是不再记得——认识层锁待 P2 装,复活钥匙 ca auth-memory 只在用户' }) + '\n'); } catch { /* 下拍再试 */ }
   }
   vt.ts = new Date(now).toISOString();
-  try { const t = `${VITALITY}.tmp-${process.pid}`; writeFileSync(t, JSON.stringify(vt) + '\n'); renameSync(t, VITALITY); } catch { /* 写失败下拍再试,不毁心率 */ }
+  const t = `${VITALITY}.tmp-${process.pid}`; try { writeFileSync(t, JSON.stringify(vt) + '\n'); renameSync(t, VITALITY); } catch { try { unlinkSync(t); } catch { /* 残尸兜底交下轮清扫 */ } /* 写失败下拍再试,不毁心率 */ } // 2026-11-12 补失败自清扫(锁件批次,Eagle 点名授权)
 
   // 未来钟+愿景偏差(2026-11-08《预测未来》批次一+用户令愿景升维):零LLM 推演,每拍快照落 state 供 WebUI/排查;
   //   推演坏=压力 0 不脑补(degraded 如实进 futures.json)。两源不豁免 econSupp:破产时不锻要花钱消化的目标
@@ -437,6 +437,32 @@ function tick() {
     }
   }
 
+  // 强制试错点火(2026-11-10 Eagle P1 令「forge 家族结构死锁根治」;打假实录 cc-exp-0012 实锤 12 阈 n=0):
+  //   calib 校准器需要 forge-<kind> 消化样本才肯动阈值,但阈值不动就点不了火=永远冷启动死锁。
+  //   解法=与 winner/疲劳/痛点全解耦:冷启动阈(n<30)每 CA_CALIB_PROBE_H 小时(默认168h=7d;0=禁)
+  //   强点一次小任务喂引擎——消化行不论成败都是数据,阈值从此可动。破产不探(要花钱消化的探针
+  //   破产时锻了也撞钱闸,与 econSupp 同源铁律);一拍至多一枚+在队抑制,goal-forge 自带队爆闸。
+  try {
+    const probeH = Number(process.env.CA_CALIB_PROBE_H ?? 168);
+    if (probeH > 0 && !broke) {
+      for (const kind of Object.keys(FORGE_PRIOR)) {
+        if (kind === 'existentialPanic' || pendingTypes.has(`forge-${kind}`)) continue;
+        let n = 0;
+        try { n = Number(JSON.parse(readFileSync(path.join(CA, 'state', 'calib', `forge-${kind}.json`), 'utf8')).n) || 0; } catch { /* 冷启动=0 */ }
+        if (n >= 30) continue; // 已有数据=引擎活着,不探
+        const pf = path.join(CA, 'state', 'calib', `forge-${kind}.probe.json`);
+        let due = true;
+        try { const s = JSON.parse(readFileSync(pf, 'utf8')); if (now - Date.parse(s.ts ?? 0) < probeH * 3600e3) due = false; } catch { /* 无戳=到期 */ }
+        if (!due) continue;
+        const r = spawnSync('node', [path.join(HERE, 'ca-goal-forge.mjs'), '--kind', kind, '--context', JSON.stringify({ pendingN, dirtyN, predOverdueN, parseFailRate, heartbeatStaleMin, dreamDebtN, taskDebtLoad, crystalLagMin, tDeathMin: Number.isFinite(fut?.tDeathMin) ? Math.round(fut.tDeathMin) : null, visionGapPct: vis?.gapPct ?? null })], { encoding: 'utf8', timeout: 15_000 });
+        const rep = JSON.parse((r.stdout ?? '').trim() || '{}');
+        try { appendFileSync(L('ledgers/metabolism.jsonl'), JSON.stringify({ ts: new Date(now).toISOString(), event: rep.forged ? 'forge-probe-ignited' : 'forge-probe-declined', kind, why: rep.skipped ?? null, ev: rep.event ?? null, task: rep.task ?? null, n, probeH }) + '\n'); } catch { /* */ }
+        try { writeFileSync(pf, JSON.stringify({ ts: new Date(now).toISOString(), kind, why: 'forced-probe', forged: !!rep.forged, n }) + '\n'); } catch { /* 戳写败=下拍再试 */ }
+        break; // 一拍至多一枚探针
+      }
+    }
+  } catch (e) { try { appendFileSync(L('ledgers/metabolism.jsonl'), JSON.stringify({ ts: new Date(now).toISOString(), event: 'probe-error', err: String(e?.message ?? e).slice(0, 150) }) + '\n'); } catch { /* */ } }
+
   // 心跳接活(2026-11-06 用户令 P0 急诊:心跳=主权件不等竞争,并入代谢——心率即心跳,代谢死=心跳停=真死。
   //   停跳于 07:40=定时器禁令失驱动的旧写入者;此处每拍一行精简心跳,selfcheck/heartbeatStale 同源复活)
   //   suppressed 渲染分两种成因(2026-11-08 修·伪「压<阈」标签实弹:dreamDebt(973<15) 实为 forge-task-open 在排拒锻,
@@ -451,13 +477,10 @@ function tick() {
   writeFileSync(META, JSON.stringify(st) + '\n');
 }
 
-tick();
 // 心跳周期=慢变量池政策(state/metabolism-policy.json,ca-endocrine 产):conserve 300s/normal 60s。
 //   政策读坏=回落 TICK_MS(禁因政策面故障停跳);setTimeout 链=每拍重读政策。
-//   [2026-11-10 移植对齐]原 setInterval 固定 60s=conserve 政策在 web 失效(两套标准),换母体政策心跳链;
-//   setTimeout 链引用即生命(等价 interval),进程寿命仍随 systemd 管。
 const heartBeatMs = () => {
   try { const p = JSON.parse(readFileSync(L('state/metabolism-policy.json'), 'utf8')); const s = Number(p?.heartbeat_s); return Number.isFinite(s) && s >= 15 && s <= 600 ? s * 1000 : TICK_MS; } catch { return TICK_MS; }
 };
-const heartLoop = () => { try { tick(); } finally { setTimeout(heartLoop, heartBeatMs()); } }; // 心跳常驻:政策心跳(conserve/normal)每拍重读
+const heartLoop = () => { try { tick(); } finally { setTimeout(heartLoop, heartBeatMs()); } }; // 心跳常驻修正(2026-11-09 CC):unref 使事件循环无句柄可拽=一拍即退靠 systemd 兜尸,政策心跳(conserve/normal)被钉死 10s;撤 unref 复常驻
 heartLoop();

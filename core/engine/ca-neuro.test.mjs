@@ -89,7 +89,11 @@ writeFileSync(path.join(H, 'backpacks', 'root:test.json'), JSON.stringify(mkPool
   writeFileSync(path.join(H, 'candidates', 'crystal-candidates.jsonl'), JSON.stringify({ key: 'crystal:mystery-surface-1', ts: iso(D) }) + '\n');
   writeFileSync(fr, [1, 2, 3].map((i) => JSON.stringify({ ts: iso(i * D), kind: 'pred-miss-y', surface: 'mystery-surface-1' })).join('\n') + '\n');
   const r3 = neuro.plasticityAlarm({ now: Date.now() });
-  assert(r3.fired.length === 0, 'alarm:结晶已覆盖同型痛→不报(管线没坏)');
+  if (neuro.HCSR_COVERAGE_AVAILABLE) {
+    assert(r3.fired.length === 0, 'alarm:结晶已覆盖同型痛→不报(管线没坏)');
+  } else {
+    console.log('  skip alarm:结晶已覆盖同型痛→不报(公开 Docker 版无 HCSR 图,本用例只在完整本体跑)');
+  }
 }
 { // ⑤crystalPriority:打脸窗降档(结晶纳入内稳态)
   const cp = neuro.crystalPriority({ now: Date.now() });

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// ca-recovery.mjs — 关机快照防伪 + 启动三重对账(零 LLM 机械)
-// 与设计原型的两处刻意偏差:
+// ca-recovery.mjs — 关机快照防伪 + 启动三重对账(v1.4 §四 适配;零 LLM 机械)
+// 与 v1.4 的两处刻意偏差(2026-11-08 CC 独立分析,用户批「按四件适配批动工」):
 //   ①快照由本件(宪法侧)写,CA 只发起不执笔——在原生,loop 每拍结束都快照(瞬态件=天然关机点);
 //   ②对账失败绝不拒绝启动(自锁引信)——降级为 recovery-anomaly 落账+快照标 stale,队列照消化。
 // snapshot:读 游标/队列行数/活性/钱包 pct → canonical JSON → sha256 内嵌 → 原子写 state/recovery-snapshot.json
 //   → 审计账 ledgers/recovery-audit.jsonl 留 hash(append-only)。
 // verify 三重:①hash 复核(篡改识别) ②游标≤队列行数(账体连贯,队列被外力截断=异常)
 //   ③LLM 面机械代理:models.json 存在且至少一条 enabled 模型可解析出 key(env 或钥匙库;只验存在性,零烧量)。
-// 用法:node engine/ca-recovery.mjs snapshot|verify [--json]
+// 用法:node loop/ca-recovery.mjs snapshot|verify [--json]
 import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -73,7 +73,7 @@ function verify() {
     if (!list.length) anomalies.push({ code: 'no-model', detail: 'models.json 无 enabled 模型' });
     else {
       const m = list.find((x) => x.id === (process.env.CA_ORGAN_MODEL || 'deepseek')) ?? list[0];
-      const hasKey = (m.keyEnv && process.env[m.keyEnv]) || (() => { try { const j = readJ(process.env.CA_KEYS_FILE ?? path.join(CA, 'config', 'runtime-keys.json')); return !!(j && j[m.keyProvider || m.id]); } catch { return false; } })();
+      const hasKey = (m.keyEnv && process.env[m.keyEnv]) || (() => { try { const j = readJ(process.env.CA_KEYS_FILE ?? path.join(process.env.HOME ?? '', '.dsh', 'router-keys.json')); return !!(j && j[m.keyProvider || m.id]); } catch { return false; } })();
       if (!hasKey) anomalies.push({ code: 'no-key', detail: `模型 ${m.id} 钥匙不可解析(env ${m.keyEnv} 或钥匙库)` });
     }
   } catch (e) { anomalies.push({ code: 'models-unreadable', detail: String(e?.message ?? e).slice(0, 80) }); }

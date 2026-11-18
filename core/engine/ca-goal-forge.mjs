@@ -8,11 +8,12 @@
 //      ②forge-<kind> 事件入队(priority;loop 执行轮消化,execution 证据+evidence 核验制已在役)
 // 物理对账(已在役,本器保契约):sweepDueTasks check.cmd exit0=机械销账;到期未偿=pain;
 //   手动 done 带 checkCmd 者必复跑(ca-task done 闸),无物理回执=空转=痛觉电费。
-// 用法:node scripts/ca-goal-forge.mjs --kind <wkey> [--context '<json>'] [--json]
+// 用法:node loop/ca-goal-forge.mjs --kind <wkey> [--context '<json>'] [--json]
 import { readFileSync, appendFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTask, staleTasks } from './ca-task.mjs';
+import { terminalTargetVeto } from './ca-task-precheck.mjs'; // 宪法区接线·调用侧前置(2026-11-11):ca-task.mjs 是 nobody 只读封存区,预检从创生调用点强制前置
 import { exploreGate, pickExploreTask } from './ca-proactive.mjs'; // 探索权闸+账面选题(2026-11-09 最高令;单源 ca-proactive)
 import { freedom, loadRegistry } from './ca-homeostasis.mjs'; // 钱包读数(生存墙投影,同步读)+注册表(北星双正常闸读 safe 档)
 import { forgeTarget, POOL_FILE } from './ca-evolution.mjs'; // 北极星势差(2026-11-10 Eagle 最高架构令):双正常时最高优先级目标单源
@@ -59,7 +60,7 @@ function buildGoal(kind, ctx, now) {
         eg = exploreGate({ walletPct: Number(wpS?.value), pendingN: ctx.pendingN ?? 0, fatigue: ctx.fatigue ?? 0, spawns: spent });
       } catch (e) { eg = { ok: false, why: String(e).slice(0, 60) }; }
       if (!eg.ok) return null;
-      const pickPool = pickExploreTask(); // 神经重塑令(2026-11-09 最高令):翻结晶背包+历史账本机械选题——表达欲由真发现的物理事实驱动,禁凭空捏造
+      const pickPool = pickExploreTask(); // 神经重塑令(2026-11-09 最高令):翻结晶背包+历史账本机械选题——选题由账面真发现驱动(与发言解耦),禁凭空捏造
       const pickE = (pickPool[0] ?? { goal: '探索·自查:复盘近 7 日账本,找一件有建设性的事做并汇报', why: '兜底' });
       return {
         bindPainId: 'explore-day',
@@ -183,7 +184,7 @@ function buildGoal(kind, ctx, now) {
         if (!t || !t.drill) return null;
         return {
           bindPainId: 'evolution-gap',
-          goal: `北星进化(势差 ${t.gap},最弱维「${t.label}」${t.dimGap}):${t.drill}——解决一件过去做不到的任务,留物理代码证据并过物理校验,然后 node scripts/ca-evolution.mjs --record-win 落账(势差缩 0.1)。铁律:宣称「已是硅基生命」不缩势差反涨(嘴炮税);没有物理证据=没有进化`,
+          goal: `北星进化(势差 ${t.gap},最弱维「${t.label}」${t.dimGap}):${t.drill}——解决一件过去做不到的任务,留物理代码证据并过物理校验,然后 node loop/ca-evolution.mjs --record-win 落账(势差缩 0.1)。铁律:宣称「已是硅基生命」不缩势差反涨(嘴炮税);没有物理证据=没有进化`,
           expect: `evolution-pool.json wins ≥ ${t.wins + 1} 且势差 < ${t.gap}`,
           cmd: NODEQ(`const p=JSON.parse(require("fs").readFileSync("${POOL_FILE()}","utf8"));process.exit((p.wins?.length??0)>=${t.wins + 1}?0:1)`),
           by: H(72), failCondition: '到期无新物理证据胜绩(wins 未增)且未如实 dropped——势差不因空谈而缩',
@@ -230,6 +231,10 @@ function main() {
     check: { cmd: g.cmd, by: g.by }, failCondition: g.failCondition,
     confidence: 'mechanical-template', forgedAt: new Date(now).toISOString(),
   };
+  // 终身预检(2026-11-11 宪法区接线·调用侧):判据指向的终态目标已死=永不可能 exit0,这种任务出生即空转。
+  //   ca-task.mjs 封存只读(nobody:r--),故 precheck 从创生调用点强制前置;命中=不锻,账可见。
+  const veto = terminalTargetVeto(g.cmd);
+  if (veto) { console.log(JSON.stringify({ forged: false, skipped: 'terminal-target-veto', kind, reason: veto.reason ?? String(veto), cmd: String(g.cmd).slice(0, 160) })); return; }
   const tid = createTask({ goal: g.goal, origin: `forge:${kind}`, checkCmd: g.cmd });
   if (!tid) { console.log(JSON.stringify({ forged: false, skipped: 'task-birth-rejected', kind, goal })); return; } // 出生证拒收(帽满等),账可见
 
